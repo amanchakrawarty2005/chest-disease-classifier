@@ -12,6 +12,7 @@ This script:
 
 import os
 import sys
+from PIL import report
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -346,7 +347,7 @@ Imbalance Ratio:           {sorted(self.disease_counts.items(), key=lambda x: x[
         
         # Save report
         report_path = self.output_dir / "EDA_REPORT.txt"
-        with open(report_path, 'w') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
         
         print(f"\n✅ Report saved to {report_path}")
