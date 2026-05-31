@@ -1,15 +1,16 @@
-"""
-Phase 1B: Data preprocessing pipeline for NIH Chest X-ray dataset.
+"""Phase 1B preprocessing pipeline for NIH Chest X-ray metadata.
 
-Creates:
-1) Multi-hot encoded labels for 14 diseases
-2) Train/val/test split metadata
-3) Per-split label CSV files
-4) Class weights JSON for imbalanced training
+This module prepares train/validation/test metadata files used by training.
+Outputs are intentionally stable so downstream scripts keep working.
 """
 
+from __future__ import annotations
+
+import argparse
 import json
+import logging
 from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -17,166 +18,248 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
 
 from config import (
-    RAW_DATA_DIR,
-    PROCESSED_DATA_DIR,
     DISEASE_CLASSES,
+    PROCESSED_DATA_DIR,
+    RANDOM_SEED,
+    RAW_DATA_DIR,
+    TEST_SPLIT,
     TRAIN_SPLIT,
     VAL_SPLIT,
-    TEST_SPLIT,
-    RANDOM_SEED,
 )
 
+LOGGER = logging.getLogger("data_preprocessing")
 
-class ChestXrayDataProcessor:
-    """Preprocess NIH chest X-ray metadata for training."""
 
-    def __init__(self, raw_data_dir=RAW_DATA_DIR, processed_data_dir=PROCESSED_DATA_DIR):
+def configure_logging(level: str = "INFO") -> None:
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s | %(levelname)s | %(message)s",
+    )
+
+
+def parse_finding_labels(raw_label: str) -> List[str]:
+    """Convert NIH 'Finding Labels' cell into a clean disease list."""
+    if pd.isna(raw_label) or str(raw_label).strip() == "No Finding":
+        return []
+    return [item.strip() for item in str(raw_label).split("|") if item.strip()]
+
+
+def validate_split_ratios(train_ratio: float, val_ratio: float, test_ratio: float) -> None:
+    total = train_ratio + val_ratio + test_ratio
+    if not np.isclose(total, 1.0):
+        raise ValueError(f"Invalid split ratios: train+val+test must be 1.0, got {total:.6f}")
+
+
+def safe_stratify_target(series: pd.Series, stage_name: str, min_count: int = 2) -> Optional[pd.Series]:
+    """Return series for stratification when every class has enough samples."""
+    counts = series.value_counts(dropna=False)
+    current_min = int(counts.min()) if len(counts) else 0
+
+    if current_min < min_count:
+        LOGGER.warning(
+            "%s stratification disabled: smallest group has %d sample(s), need >= %d.",
+            stage_name,
+            current_min,
+            min_count,
+        )
+        return None
+
+    return series
+
+
+def build_image_lookup(raw_data_dir: Path, patterns: Iterable[str] = ("*.png", "*.jpg", "*.jpeg")) -> Dict[str, str]:
+    """Map image filename -> absolute path (supports nested NIH folders)."""
+    lookup: Dict[str, str] = {}
+    for pattern in patterns:
+        for path in raw_data_dir.rglob(pattern):
+            lookup[path.name] = str(path)
+    return lookup
+
+
+def compute_class_weights(train_labels: np.ndarray, class_names: List[str]) -> Dict[str, float]:
+    """Compute inverse-frequency weights for multi-label BCE training."""
+    if train_labels.ndim != 2:
+        raise ValueError("Expected 2D label matrix for class-weight computation.")
+
+    total_samples, num_classes = train_labels.shape
+    weights: Dict[str, float] = {}
+
+    for idx, class_name in enumerate(class_names):
+        positive_count = int(np.sum(train_labels[:, idx]))
+        weights[class_name] = float(total_samples / (num_classes * max(positive_count, 1)))
+
+    return weights
+
+
+class NIHPreprocessor:
+    """Prepare metadata splits and labels for model training/evaluation."""
+
+    def __init__(
+        self,
+        raw_data_dir: Path,
+        processed_data_dir: Path,
+        csv_name: str = "Data_Entry_2017.csv",
+        seed: int = RANDOM_SEED,
+    ) -> None:
         self.raw_data_dir = Path(raw_data_dir)
         self.processed_data_dir = Path(processed_data_dir)
+        self.csv_path = self.raw_data_dir / csv_name
+        self.seed = seed
+
         self.processed_data_dir.mkdir(parents=True, exist_ok=True)
-        self.df = None
+        self.df: Optional[pd.DataFrame] = None
 
-    def load_metadata(self):
-        csv_path = self.raw_data_dir / "Data_Entry_2017.csv"
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Dataset CSV not found: {csv_path}")
+    def load_metadata(self) -> pd.DataFrame:
+        if not self.csv_path.exists():
+            raise FileNotFoundError(f"Dataset CSV not found: {self.csv_path}")
 
-        self.df = pd.read_csv(csv_path)
-        required_cols = {"Image Index", "Finding Labels"}
-        missing = required_cols.difference(self.df.columns)
+        df = pd.read_csv(self.csv_path)
+        required_columns = {"Image Index", "Finding Labels"}
+        missing = required_columns.difference(df.columns)
         if missing:
-            raise ValueError(f"Missing required columns in CSV: {missing}")
+            raise ValueError(f"CSV missing required columns: {sorted(missing)}")
 
-        print(f"Loaded metadata: {len(self.df):,} rows")
-        return self.df
+        self.df = df
+        LOGGER.info("Loaded metadata with %s rows from %s", f"{len(df):,}", self.csv_path)
+        return df
 
-    @staticmethod
-    def parse_diseases(disease_string):
-        if pd.isna(disease_string) or disease_string == "No Finding":
-            return []
-        return [x.strip() for x in str(disease_string).split("|") if x.strip()]
-
-    def build_labels(self):
+    def build_label_matrix(self) -> np.ndarray:
         if self.df is None:
-            raise RuntimeError("Call load_metadata() before build_labels().")
+            raise RuntimeError("load_metadata() must run before build_label_matrix().")
 
-        self.df["diseases_list"] = self.df["Finding Labels"].apply(self.parse_diseases)
+        self.df["diseases_list"] = self.df["Finding Labels"].apply(parse_finding_labels)
+        self.df["num_diseases"] = self.df["diseases_list"].apply(len)
 
-        mlb = MultiLabelBinarizer(classes=DISEASE_CLASSES)
-        label_matrix = mlb.fit_transform(self.df["diseases_list"])
+        encoder = MultiLabelBinarizer(classes=DISEASE_CLASSES)
+        label_matrix = encoder.fit_transform(self.df["diseases_list"])
 
         if label_matrix.shape[1] != len(DISEASE_CLASSES):
-            raise RuntimeError("Label matrix shape mismatch with DISEASE_CLASSES.")
+            raise RuntimeError("Label matrix width mismatch with DISEASE_CLASSES.")
 
-        self.df["num_diseases"] = self.df["diseases_list"].apply(len)
+        LOGGER.info("Built multi-hot labels with shape %s", label_matrix.shape)
         return label_matrix
 
-    @staticmethod
-    def _safe_stratify(series, stage_name):
-        counts = series.value_counts()
-        min_count = int(counts.min()) if len(counts) else 0
-
-        if min_count < 2:
-            print(f"Warning: {stage_name} stratification disabled (least-populated group has {min_count} sample).")
-            return None
-
-        return series
-
-    def split_data(self):
+    def split_dataframe(
+        self,
+        train_ratio: float,
+        val_ratio: float,
+        test_ratio: float,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         if self.df is None or "num_diseases" not in self.df.columns:
-            raise RuntimeError("Call build_labels() before split_data().")
+            raise RuntimeError("build_label_matrix() must run before split_dataframe().")
 
-        if not np.isclose(TRAIN_SPLIT + VAL_SPLIT + TEST_SPLIT, 1.0):
-            raise ValueError("TRAIN_SPLIT + VAL_SPLIT + TEST_SPLIT must equal 1.0")
+        validate_split_ratios(train_ratio, val_ratio, test_ratio)
 
-        stratify_stage1 = self._safe_stratify(self.df["num_diseases"], "Stage-1")
-
+        stage1_target = safe_stratify_target(self.df["num_diseases"], "Stage-1")
         train_df, temp_df = train_test_split(
             self.df,
-            test_size=(VAL_SPLIT + TEST_SPLIT),
-            stratify=stratify_stage1,
-            random_state=RANDOM_SEED,
+            test_size=(val_ratio + test_ratio),
+            random_state=self.seed,
+            stratify=stage1_target,
         )
 
-        val_ratio_in_temp = VAL_SPLIT / (VAL_SPLIT + TEST_SPLIT)
-        stratify_stage2 = self._safe_stratify(temp_df["num_diseases"], "Stage-2")
-
+        val_ratio_in_temp = val_ratio / (val_ratio + test_ratio)
+        stage2_target = safe_stratify_target(temp_df["num_diseases"], "Stage-2")
         val_df, test_df = train_test_split(
             temp_df,
             test_size=(1 - val_ratio_in_temp),
-            stratify=stratify_stage2,
-            random_state=RANDOM_SEED,
+            random_state=self.seed,
+            stratify=stage2_target,
         )
 
-        print(f"Split sizes -> train: {len(train_df):,}, val: {len(val_df):,}, test: {len(test_df):,}")
+        LOGGER.info(
+            "Split sizes -> train: %s | val: %s | test: %s",
+            f"{len(train_df):,}",
+            f"{len(val_df):,}",
+            f"{len(test_df):,}",
+        )
         return train_df, val_df, test_df
 
     @staticmethod
-    def _image_lookup(raw_data_dir):
-        lookup = {}
-        for ext in ("*.png", "*.jpg", "*.jpeg"):
-            for path in raw_data_dir.rglob(ext):
-                lookup[path.name] = str(path)
-        return lookup
+    def build_split_dataframe(split_df: pd.DataFrame, label_matrix: np.ndarray, image_lookup: Dict[str, str]) -> pd.DataFrame:
+        split_indices = split_df.index.to_numpy()
+        split_labels = label_matrix[split_indices]
 
-    def save_outputs(self, label_matrix, train_df, val_df, test_df):
-        splits = {"train": train_df, "val": val_df, "test": test_df}
+        out_df = pd.DataFrame(
+            {
+                "Image Index": split_df["Image Index"].values,
+                "image_path": [image_lookup.get(name, "") for name in split_df["Image Index"].values],
+                "labels": [row.tolist() for row in split_labels],
+            }
+        )
+        return out_df
 
-        with open(self.processed_data_dir / "data_splits.json", "w", encoding="utf-8") as f:
-            json.dump({k: v["Image Index"].tolist() for k, v in splits.items()}, f, indent=2)
+    def save_outputs(
+        self,
+        label_matrix: np.ndarray,
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+    ) -> None:
+        split_frames = {"train": train_df, "val": val_df, "test": test_df}
 
-        image_lookup = self._image_lookup(self.raw_data_dir)
+        split_json_path = self.processed_data_dir / "data_splits.json"
+        with open(split_json_path, "w", encoding="utf-8") as handle:
+            json.dump({name: frame["Image Index"].tolist() for name, frame in split_frames.items()}, handle, indent=2)
+        LOGGER.info("Saved split index file: %s", split_json_path)
 
-        for split_name, split_df in splits.items():
-            indices = split_df.index.to_numpy()
-            labels_subset = label_matrix[indices]
+        image_lookup = build_image_lookup(self.raw_data_dir)
 
-            out_df = pd.DataFrame(
-                {
-                    "Image Index": split_df["Image Index"].values,
-                    "image_path": [image_lookup.get(name, "") for name in split_df["Image Index"].values],
-                    "labels": [row.tolist() for row in labels_subset],
-                }
-            )
-
-            out_path = self.processed_data_dir / f"{split_name}_labels.csv"
-            out_df.to_csv(out_path, index=False)
-            print(f"Saved {split_name} labels: {out_path}")
+        for split_name, split_df in split_frames.items():
+            out_df = self.build_split_dataframe(split_df, label_matrix, image_lookup)
+            out_csv = self.processed_data_dir / f"{split_name}_labels.csv"
+            out_df.to_csv(out_csv, index=False)
+            LOGGER.info("Saved %s labels: %s", split_name, out_csv)
 
         train_indices = train_df.index.to_numpy()
-        class_weights = self._calculate_class_weights(label_matrix[train_indices])
+        train_labels = label_matrix[train_indices]
+        weights = compute_class_weights(train_labels, DISEASE_CLASSES)
 
-        with open(self.processed_data_dir / "class_weights.json", "w", encoding="utf-8") as f:
-            json.dump(class_weights, f, indent=2)
+        weights_path = self.processed_data_dir / "class_weights.json"
+        with open(weights_path, "w", encoding="utf-8") as handle:
+            json.dump(weights, handle, indent=2)
+        LOGGER.info("Saved class weights: %s", weights_path)
 
-        print(f"Saved class weights: {self.processed_data_dir / 'class_weights.json'}")
-
-    @staticmethod
-    def _calculate_class_weights(train_labels):
-        total_samples = len(train_labels)
-        num_classes = train_labels.shape[1]
-
-        weights = {}
-        for i, disease in enumerate(DISEASE_CLASSES):
-            positive_count = int(np.sum(train_labels[:, i]))
-            weight = total_samples / (num_classes * max(positive_count, 1))
-            weights[disease] = float(weight)
-
-        return weights
-
-    def run(self):
-        print("=" * 70)
-        print("PHASE 1B: DATA PREPROCESSING")
-        print("=" * 70)
+    def run(self, train_ratio: float, val_ratio: float, test_ratio: float) -> None:
+        LOGGER.info("%s", "=" * 72)
+        LOGGER.info("Phase 1B | Metadata preprocessing")
+        LOGGER.info("%s", "=" * 72)
 
         self.load_metadata()
-        labels = self.build_labels()
-        train_df, val_df, test_df = self.split_data()
-        self.save_outputs(labels, train_df, val_df, test_df)
+        label_matrix = self.build_label_matrix()
+        train_df, val_df, test_df = self.split_dataframe(train_ratio, val_ratio, test_ratio)
+        self.save_outputs(label_matrix, train_df, val_df, test_df)
 
-        print("\nPreprocessing complete.")
-        print(f"Outputs written to: {self.processed_data_dir}")
+        LOGGER.info("Preprocessing complete. Outputs directory: %s", self.processed_data_dir)
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Prepare NIH Chest X-ray train/val/test metadata.")
+    parser.add_argument("--raw-data-dir", type=Path, default=Path(RAW_DATA_DIR), help="Directory containing Data_Entry_2017.csv and images")
+    parser.add_argument("--processed-data-dir", type=Path, default=Path(PROCESSED_DATA_DIR), help="Directory where processed outputs will be written")
+    parser.add_argument("--csv-name", type=str, default="Data_Entry_2017.csv", help="Metadata CSV filename inside raw-data-dir")
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed for data splitting")
+    parser.add_argument("--train-split", type=float, default=TRAIN_SPLIT, help="Train split ratio")
+    parser.add_argument("--val-split", type=float, default=VAL_SPLIT, help="Validation split ratio")
+    parser.add_argument("--test-split", type=float, default=TEST_SPLIT, help="Test split ratio")
+    parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
+    return parser
+
+
+def main() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args()
+
+    configure_logging(args.log_level)
+
+    processor = NIHPreprocessor(
+        raw_data_dir=args.raw_data_dir,
+        processed_data_dir=args.processed_data_dir,
+        csv_name=args.csv_name,
+        seed=args.seed,
+    )
+    processor.run(args.train_split, args.val_split, args.test_split)
 
 
 if __name__ == "__main__":
-    ChestXrayDataProcessor().run()
+    main()

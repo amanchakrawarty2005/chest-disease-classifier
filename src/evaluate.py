@@ -1,63 +1,88 @@
-"""Evaluation script for chest disease multi-label model."""
+"""Phase 3 evaluation script for multi-label chest disease classifier."""
 
+from __future__ import annotations
+
+import argparse
 import ast
 import json
+import logging
 from pathlib import Path
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 
-from config import PROCESSED_DATA_DIR, MODEL_DIR, IMAGE_SIZE, DISEASE_CLASSES
+from config import DISEASE_CLASSES, IMAGE_SIZE, MODEL_DIR, PROCESSED_DATA_DIR, RANDOM_SEED
+
+LOGGER = logging.getLogger("evaluate")
+AUTOTUNE = tf.data.AUTOTUNE
 
 
-def _parse_label_cell(cell):
+def configure_logging(level: str = "INFO") -> None:
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s | %(levelname)s | %(message)s",
+    )
+
+
+def parse_label_cell(cell) -> np.ndarray:
     if isinstance(cell, str):
         return np.array(ast.literal_eval(cell), dtype=np.float32)
     return np.array(cell, dtype=np.float32)
 
 
-def _load_test_split():
-    path = Path(PROCESSED_DATA_DIR) / "test_labels.csv"
-    if not path.exists():
-        raise FileNotFoundError(f"Missing test split file: {path}")
+def load_test_split(
+    processed_data_dir: Path,
+    max_samples: Optional[int] = None,
+    seed: int = RANDOM_SEED,
+) -> Tuple[np.ndarray, np.ndarray]:
+    csv_path = processed_data_dir / "test_labels.csv"
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Missing test split file: {csv_path}")
 
-    df = pd.read_csv(path)
-    if "image_path" not in df.columns or "labels" not in df.columns:
-        raise ValueError(f"Invalid file format in {path}")
+    df = pd.read_csv(csv_path)
+    required = {"image_path", "labels"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(f"Invalid test split format in {csv_path}. Missing: {sorted(missing)}")
+
+    if max_samples is not None and max_samples > 0 and len(df) > max_samples:
+        df = df.sample(n=max_samples, random_state=seed).reset_index(drop=True)
 
     image_paths = df["image_path"].astype(str).values
-    labels = np.stack(df["labels"].apply(_parse_label_cell).values)
+    labels = np.stack(df["labels"].apply(parse_label_cell).values).astype(np.float32)
 
-    valid_mask = np.array([Path(p).exists() and len(p) > 0 for p in image_paths])
+    valid_mask = np.array([Path(path).exists() and len(path) > 0 for path in image_paths])
     image_paths = image_paths[valid_mask]
     labels = labels[valid_mask]
 
     if len(image_paths) == 0:
-        raise RuntimeError("No valid test images found.")
+        raise RuntimeError("No valid test images found after path filtering.")
 
+    LOGGER.info("Loaded test split with %s usable samples", f"{len(image_paths):,}")
     return image_paths, labels
 
 
-def _decode_image(path, label):
-    bytes_ = tf.io.read_file(path)
-    image = tf.io.decode_image(bytes_, channels=1, expand_animations=False)
-    image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE], method="bilinear")
+def decode_image(path: tf.Tensor, label: tf.Tensor, image_size: int):
+    image_bytes = tf.io.read_file(path)
+    image = tf.io.decode_image(image_bytes, channels=1, expand_animations=False)
+    image = tf.image.resize(image, [image_size, image_size], method="bilinear")
     image = tf.cast(image, tf.float32) / 255.0
     image = tf.image.grayscale_to_rgb(image)
+    image.set_shape([image_size, image_size, 3])
     return image, label
 
 
-def _build_dataset(image_paths, labels, batch_size=16):
+def build_dataset(image_paths: np.ndarray, labels: np.ndarray, batch_size: int, image_size: int):
     ds = tf.data.Dataset.from_tensor_slices((image_paths, labels))
-    ds = ds.map(_decode_image, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    ds = ds.map(lambda p, y: decode_image(p, y, image_size), num_parallel_calls=AUTOTUNE)
+    ds = ds.batch(batch_size).prefetch(AUTOTUNE)
     return ds
 
 
-def _load_model():
-    model_dir = Path(MODEL_DIR)
+def load_trained_model(model_dir: Path) -> Tuple[tf.keras.Model, Path]:
     final_path = model_dir / "final_model.keras"
     best_path = model_dir / "best_model.keras"
 
@@ -66,81 +91,105 @@ def _load_model():
     if best_path.exists():
         return tf.keras.models.load_model(best_path), best_path
 
-    raise FileNotFoundError("No trained model found in saved_model/. Expected final_model.keras or best_model.keras")
+    raise FileNotFoundError("No trained model found. Expected final_model.keras or best_model.keras.")
 
 
-def _safe_auc(y_true, y_prob):
-    aucs = {}
-    for i, name in enumerate(DISEASE_CLASSES):
-        y_t = y_true[:, i]
-        y_p = y_prob[:, i]
-        if np.unique(y_t).size < 2:
-            aucs[name] = None
-        else:
-            aucs[name] = float(roc_auc_score(y_t, y_p))
-    return aucs
+def compute_per_class_metric(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    metric_fn: Callable[[np.ndarray, np.ndarray], float],
+) -> Dict[str, Optional[float]]:
+    result: Dict[str, Optional[float]] = {}
+    for idx, class_name in enumerate(DISEASE_CLASSES):
+        y_true_col = y_true[:, idx]
+        y_prob_col = y_prob[:, idx]
+
+        if np.unique(y_true_col).size < 2:
+            result[class_name] = None
+            continue
+
+        result[class_name] = float(metric_fn(y_true_col, y_prob_col))
+
+    return result
 
 
-def _safe_ap(y_true, y_prob):
-    aps = {}
-    for i, name in enumerate(DISEASE_CLASSES):
-        y_t = y_true[:, i]
-        y_p = y_prob[:, i]
-        if np.unique(y_t).size < 2:
-            aps[name] = None
-        else:
-            aps[name] = float(average_precision_score(y_t, y_p))
-    return aps
+def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, threshold: float) -> Dict[str, object]:
+    y_pred = (y_prob >= threshold).astype(np.float32)
 
+    per_class_auc = compute_per_class_metric(y_true, y_prob, roc_auc_score)
+    per_class_ap = compute_per_class_metric(y_true, y_prob, average_precision_score)
 
-def main():
-    print("Loading test split...")
-    image_paths, y_true = _load_test_split()
-    print(f"Test samples: {len(image_paths):,}")
+    valid_aucs = [value for value in per_class_auc.values() if value is not None]
 
-    ds = _build_dataset(image_paths, y_true, batch_size=16)
+    metrics = {
+        "micro_auc": float(roc_auc_score(y_true.ravel(), y_prob.ravel())),
+        "macro_auc": float(np.mean(valid_aucs)) if valid_aucs else None,
+        "subset_accuracy": float(np.mean(np.all(y_pred == y_true, axis=1))),
+        "hamming_accuracy": float(np.mean(y_pred == y_true)),
+    }
 
-    model, model_path = _load_model()
-    print(f"Loaded model: {model_path}")
-
-    print("Running predictions...")
-    y_prob = model.predict(ds, verbose=1)
-
-    y_pred = (y_prob >= 0.5).astype(np.float32)
-
-    micro_auc = float(roc_auc_score(y_true.ravel(), y_prob.ravel()))
-    macro_auc = float(np.nanmean([v for v in _safe_auc(y_true, y_prob).values() if v is not None]))
-
-    subset_acc = float(np.mean(np.all(y_pred == y_true, axis=1)))
-    hamming_acc = float(np.mean(y_pred == y_true))
-
-    per_class_auc = _safe_auc(y_true, y_prob)
-    per_class_ap = _safe_ap(y_true, y_prob)
-
-    report = {
-        "test_samples": int(len(image_paths)),
-        "model_path": str(model_path),
-        "threshold": 0.5,
-        "metrics": {
-            "micro_auc": micro_auc,
-            "macro_auc": macro_auc,
-            "subset_accuracy": subset_acc,
-            "hamming_accuracy": hamming_acc,
-        },
+    return {
+        "threshold": threshold,
+        "metrics": metrics,
         "per_class_auc": per_class_auc,
         "per_class_average_precision": per_class_ap,
     }
 
-    out_path = Path(PROCESSED_DATA_DIR) / "evaluation_report.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
 
-    print("\nEvaluation complete")
-    print(f"micro_auc: {micro_auc:.4f}")
-    print(f"macro_auc: {macro_auc:.4f}")
-    print(f"subset_accuracy: {subset_acc:.4f}")
-    print(f"hamming_accuracy: {hamming_acc:.4f}")
-    print(f"Report saved: {out_path}")
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Evaluate trained chest disease classifier on test split.")
+    parser.add_argument("--processed-data-dir", type=Path, default=Path(PROCESSED_DATA_DIR), help="Directory containing test_labels.csv")
+    parser.add_argument("--model-dir", type=Path, default=Path(MODEL_DIR), help="Directory containing trained model files")
+    parser.add_argument("--output-path", type=Path, default=None, help="Optional explicit output JSON path")
+    parser.add_argument("--image-size", type=int, default=IMAGE_SIZE, help="Evaluation image size")
+    parser.add_argument("--batch-size", type=int, default=16, help="Batch size for model.predict")
+    parser.add_argument("--threshold", type=float, default=0.5, help="Threshold for converting probabilities to binary predictions")
+    parser.add_argument("--max-samples", type=int, default=None, help="Optional cap for quick evaluation runs")
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed for sampling")
+    parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
+    return parser
+
+
+def main() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args()
+
+    configure_logging(args.log_level)
+
+    LOGGER.info("Loading test split...")
+    image_paths, y_true = load_test_split(args.processed_data_dir, args.max_samples, args.seed)
+
+    dataset = build_dataset(
+        image_paths,
+        y_true,
+        batch_size=args.batch_size,
+        image_size=args.image_size,
+    )
+
+    model, model_path = load_trained_model(args.model_dir)
+    LOGGER.info("Loaded model: %s", model_path)
+
+    LOGGER.info("Running predictions...")
+    y_prob = model.predict(dataset, verbose=1)
+
+    report = evaluate_predictions(y_true, y_prob, threshold=args.threshold)
+    report["test_samples"] = int(len(image_paths))
+    report["model_path"] = str(model_path)
+
+    output_path = args.output_path or (args.processed_data_dir / "evaluation_report.json")
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2)
+
+    LOGGER.info("Evaluation complete")
+    LOGGER.info("micro_auc: %.4f", report["metrics"]["micro_auc"])
+    macro_auc = report["metrics"]["macro_auc"]
+    if macro_auc is None:
+        LOGGER.info("macro_auc: N/A (insufficient positives for all classes)")
+    else:
+        LOGGER.info("macro_auc: %.4f", macro_auc)
+    LOGGER.info("subset_accuracy: %.4f", report["metrics"]["subset_accuracy"])
+    LOGGER.info("hamming_accuracy: %.4f", report["metrics"]["hamming_accuracy"])
+    LOGGER.info("Report saved: %s", output_path)
 
 
 if __name__ == "__main__":
