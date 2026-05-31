@@ -71,16 +71,16 @@ IMAGE_STD = 0.229
 
 # Architecture
 MODEL_NAME = "EfficientNetB0"
-BACKBONE_TRAINABLE_LAYERS = 30  # Unfreeze last 30 layers for fine-tuning
+BACKBONE_TRAINABLE_LAYERS = 10  # Laptop-safe: unfreeze fewer layers for lower VRAM use
 
 # Training - Phase 1: Frozen backbone, train custom head
-BATCH_SIZE = 32
-EPOCHS_PHASE1 = 10
+BATCH_SIZE = 8
+EPOCHS_PHASE1 = 3
 LEARNING_RATE_PHASE1 = 1e-3
 OPTIMIZER_PHASE1 = "adam"
 
 # Training - Phase 2: Fine-tune entire model
-EPOCHS_PHASE2 = 10
+EPOCHS_PHASE2 = 2
 LEARNING_RATE_PHASE2 = 1e-5
 OPTIMIZER_PHASE2 = "adam"
 
