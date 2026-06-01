@@ -153,7 +153,7 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Inference Settings")
-        default_api_url = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+        default_api_url = os.getenv("API_BASE_URL", "https://chest-disease-classifier.onrender.com")
         api_base_url = st.text_input("API Base URL", value=default_api_url)
         threshold = st.slider("Threshold", min_value=0.01, max_value=0.90, value=0.50, step=0.01)
         top_k = st.slider("Top-K", min_value=1, max_value=len(DISEASE_CLASSES), value=5, step=1)
