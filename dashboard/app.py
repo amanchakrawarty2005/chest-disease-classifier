@@ -149,7 +149,6 @@ def main() -> None:
     configure_page()
 
     st.title("Chest Disease Classifier Dashboard")
-    st.caption("Phase 5: Streamlit frontend connected to FastAPI inference service")
 
     with st.sidebar:
         st.header("Inference Settings")
