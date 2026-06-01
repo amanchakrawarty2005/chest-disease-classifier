@@ -25,7 +25,6 @@ data/processed/
 *.zip
 
 # Models (don't commit model files)
-saved_model/
 *.h5
 *.pkl
 *.joblib
