@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -23,11 +24,16 @@ class ChestXrayInferenceService:
 
         self._model: tf.keras.Model | None = None
         self._model_path: Path | None = None
+        self._class_weights: Dict[str, float] | None = None
         self._predict_lock = threading.Lock()
 
     @property
     def model_loaded(self) -> bool:
         return self._model is not None
+    
+    @property
+    def class_weights(self) -> Dict[str, float] | None:
+        return self._class_weights
 
     @property
     def model_path(self) -> Path | None:
@@ -42,6 +48,36 @@ class ChestXrayInferenceService:
             f"No model file found in {self.model_dir}. "
             "Expected final_model.keras or best_model.keras."
         )
+    
+    def load_class_weights(self) -> Optional[Dict[str, float]]:
+        """Load class weights from processed data directory."""
+        # Try to find class_weights.json in parent directory
+        parent_dir = self.model_dir.parent
+        weights_path = parent_dir / "data" / "processed" / "class_weights.json"
+        
+        if not weights_path.exists():
+            LOGGER.warning("Class weights file not found: %s", weights_path)
+            return None
+        
+        try:
+            with open(weights_path, "r", encoding="utf-8") as f:
+                all_weights = json.load(f)
+            
+            # Handle new format with multiple weight options
+            if isinstance(all_weights, dict):
+                if "recommended" in all_weights:
+                    self._class_weights = all_weights["recommended"]
+                    LOGGER.info("Loaded recommended class weights (for handling imbalance)")
+                    return self._class_weights
+                else:
+                    # Old format - assume it's the weights dict itself
+                    self._class_weights = all_weights
+                    LOGGER.info("Loaded class weights (legacy format)")
+                    return self._class_weights
+        except Exception as exc:
+            LOGGER.warning("Failed to load class weights: %s", exc)
+        
+        return None
 
     def load_model(self) -> Path:
         if self._model is not None and self._model_path is not None:
@@ -52,6 +88,10 @@ class ChestXrayInferenceService:
         self._model = tf.keras.models.load_model(path)
         self._model_path = path
         LOGGER.info("Model loaded successfully.")
+        
+        # Try to load class weights for balanced predictions
+        self.load_class_weights()
+        
         return path
 
     def preprocess_image_bytes(self, raw_bytes: bytes) -> np.ndarray:
@@ -91,13 +131,24 @@ class ChestXrayInferenceService:
     ) -> Tuple[List[dict], List[dict], List[str]]:
         scores: List[dict] = []
 
-        for disease, prob in zip(self.disease_classes, probabilities):
+        for idx, (disease, prob) in enumerate(zip(self.disease_classes, probabilities)):
             probability = float(prob)
+            
+            # Use class-specific threshold if weights are available
+            # Higher weight (rarer class) = lower threshold = more sensitive detection
+            class_threshold = threshold
+            if self._class_weights and disease in self._class_weights:
+                weight = self._class_weights[disease]
+                # Adjust threshold based on class weight
+                # Higher weight means we want to be more sensitive (lower threshold)
+                class_threshold = threshold / (1.0 + weight / 10.0)
+            
             scores.append(
                 {
                     "disease": disease,
                     "probability": probability,
-                    "predicted": probability >= threshold,
+                    "predicted": probability >= class_threshold,
+                    "confidence_adjusted": class_threshold != threshold,
                 }
             )
 

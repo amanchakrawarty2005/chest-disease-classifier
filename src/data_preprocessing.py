@@ -26,6 +26,12 @@ from config import (
     TRAIN_SPLIT,
     VAL_SPLIT,
 )
+from balancing import (
+    compute_balanced_class_weights,
+    get_class_balance_report,
+    oversample_minority_classes,
+    save_balance_report,
+)
 
 LOGGER = logging.getLogger("data_preprocessing")
 
@@ -81,14 +87,12 @@ def compute_class_weights(train_labels: np.ndarray, class_names: List[str]) -> D
     if train_labels.ndim != 2:
         raise ValueError("Expected 2D label matrix for class-weight computation.")
 
-    total_samples, num_classes = train_labels.shape
-    weights: Dict[str, float] = {}
-
-    for idx, class_name in enumerate(class_names):
-        positive_count = int(np.sum(train_labels[:, idx]))
-        weights[class_name] = float(total_samples / (num_classes * max(positive_count, 1)))
-
-    return weights
+    return compute_balanced_class_weights(
+        train_labels,
+        class_names,
+        method="inverse_frequency",
+        smoothing=1.0,
+    )
 
 
 class NIHPreprocessor:
@@ -176,10 +180,8 @@ class NIHPreprocessor:
         return train_df, val_df, test_df
 
     @staticmethod
-    def build_split_dataframe(split_df: pd.DataFrame, label_matrix: np.ndarray, image_lookup: Dict[str, str]) -> pd.DataFrame:
-        split_indices = split_df.index.to_numpy()
-        split_labels = label_matrix[split_indices]
-
+    def build_split_dataframe(split_df: pd.DataFrame, split_labels: np.ndarray, image_lookup: Dict[str, str]) -> pd.DataFrame:
+        """Build output dataframe pairing images with labels (already aligned)."""
         out_df = pd.DataFrame(
             {
                 "Image Index": split_df["Image Index"].values,
@@ -195,8 +197,37 @@ class NIHPreprocessor:
         train_df: pd.DataFrame,
         val_df: pd.DataFrame,
         test_df: pd.DataFrame,
+        apply_oversampling: bool = True,
     ) -> None:
+        # Extract labels using original dataframe indices BEFORE any modifications
+        original_train_labels = label_matrix[train_df.index.to_numpy()].copy()
+        val_labels = label_matrix[val_df.index.to_numpy()].copy()
+        test_labels = label_matrix[test_df.index.to_numpy()].copy()
+        
+        # Apply oversampling to training data for better balance
+        if apply_oversampling:
+            LOGGER.info("Applying minority class oversampling to training data...")
+            train_df, train_labels = oversample_minority_classes(
+                train_df,
+                original_train_labels,
+                DISEASE_CLASSES,
+                target_ratio=0.25,
+                seed=self.seed,
+            )
+        else:
+            train_labels = original_train_labels.copy()
+        
+        # Reset all dataframe indices to be sequential and aligned with their labels
+        train_df = train_df.reset_index(drop=True)
+        val_df = val_df.reset_index(drop=True)
+        test_df = test_df.reset_index(drop=True)
+        
         split_frames = {"train": train_df, "val": val_df, "test": test_df}
+        all_labels = {
+            "train": train_labels,
+            "val": val_labels,
+            "test": test_labels,
+        }
 
         split_json_path = self.processed_data_dir / "data_splits.json"
         with open(split_json_path, "w", encoding="utf-8") as handle:
@@ -206,29 +237,63 @@ class NIHPreprocessor:
         image_lookup = build_image_lookup(self.raw_data_dir)
 
         for split_name, split_df in split_frames.items():
-            out_df = self.build_split_dataframe(split_df, label_matrix, image_lookup)
+            split_labels = all_labels[split_name]
+            out_df = self.build_split_dataframe(split_df, split_labels, image_lookup)
             out_csv = self.processed_data_dir / f"{split_name}_labels.csv"
             out_df.to_csv(out_csv, index=False)
             LOGGER.info("Saved %s labels: %s", split_name, out_csv)
 
-        train_indices = train_df.index.to_numpy()
-        train_labels = label_matrix[train_indices]
-        weights = compute_class_weights(train_labels, DISEASE_CLASSES)
-
+        # Compute and save class weights (using ORIGINAL non-oversampled training data for weights)
+        # Generate multiple weight options
+        weights_inverse = compute_balanced_class_weights(
+            original_train_labels, DISEASE_CLASSES, method="inverse_frequency"
+        )
+        weights_effective = compute_balanced_class_weights(
+            original_train_labels, DISEASE_CLASSES, method="effective_num"
+        )
+        weights_focal = compute_balanced_class_weights(
+            original_train_labels, DISEASE_CLASSES, method="focal_loss"
+        )
+        
         weights_path = self.processed_data_dir / "class_weights.json"
         with open(weights_path, "w", encoding="utf-8") as handle:
-            json.dump(weights, handle, indent=2)
+            json.dump(
+                {
+                    "inverse_frequency": weights_inverse,
+                    "effective_num": weights_effective,
+                    "focal_loss": weights_focal,
+                    "recommended": weights_effective,
+                },
+                handle,
+                indent=2,
+            )
         LOGGER.info("Saved class weights: %s", weights_path)
 
-    def run(self, train_ratio: float, val_ratio: float, test_ratio: float) -> None:
+        # Generate and save class balance reports
+        for split_name, split_labels in all_labels.items():
+            report = get_class_balance_report(split_labels, DISEASE_CLASSES, split_name)
+            report_path = self.processed_data_dir / f"{split_name}_balance_report.json"
+            save_balance_report(report, report_path)
+            
+            # Log summary
+            LOGGER.info(
+                "%s split - Total: %d | Healthy: %d | Diseased: %d | Imbalance Ratio: %.2fx",
+                split_name.upper(),
+                report["total_samples"],
+                report["healthy_samples"],
+                report["diseased_samples"],
+                report["imbalance_ratio"],
+            )
+
+    def run(self, train_ratio: float, val_ratio: float, test_ratio: float, apply_oversampling: bool = True) -> None:
         LOGGER.info("%s", "=" * 72)
-        LOGGER.info("Phase 1B | Metadata preprocessing")
+        LOGGER.info("Phase 1B | Metadata preprocessing with class balancing")
         LOGGER.info("%s", "=" * 72)
 
         self.load_metadata()
         label_matrix = self.build_label_matrix()
         train_df, val_df, test_df = self.split_dataframe(train_ratio, val_ratio, test_ratio)
-        self.save_outputs(label_matrix, train_df, val_df, test_df)
+        self.save_outputs(label_matrix, train_df, val_df, test_df, apply_oversampling=apply_oversampling)
 
         LOGGER.info("Preprocessing complete. Outputs directory: %s", self.processed_data_dir)
 
@@ -242,6 +307,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--train-split", type=float, default=TRAIN_SPLIT, help="Train split ratio")
     parser.add_argument("--val-split", type=float, default=VAL_SPLIT, help="Validation split ratio")
     parser.add_argument("--test-split", type=float, default=TEST_SPLIT, help="Test split ratio")
+    parser.add_argument("--apply-oversampling", type=bool, default=True, help="Apply minority class oversampling")
     parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
     return parser
 
@@ -258,7 +324,7 @@ def main() -> None:
         csv_name=args.csv_name,
         seed=args.seed,
     )
-    processor.run(args.train_split, args.val_split, args.test_split)
+    processor.run(args.train_split, args.val_split, args.test_split, apply_oversampling=args.apply_oversampling)
 
 
 if __name__ == "__main__":

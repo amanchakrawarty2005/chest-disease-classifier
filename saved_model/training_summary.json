@@ -1,0 +1,11 @@
+{
+  "train_samples": 96584,
+  "val_samples": 11212,
+  "batch_size": 8,
+  "image_size": 224,
+  "epochs_phase1": 3,
+  "epochs_phase2": 2,
+  "lr_phase1": 0.001,
+  "lr_phase2": 1e-05,
+  "sample_weighting_method": "effective_num"
+}

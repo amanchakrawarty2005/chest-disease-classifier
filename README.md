@@ -43,6 +43,24 @@ End-to-end multi-label chest X-ray classification project built on the NIH Chest
 - `src/gradcam.py`
 - Generates Grad-CAM overlays for sampled test images.
 
+- `src/balancing.py`
+- Comprehensive class imbalance handling: weighted sampling, oversampling, and balanced metrics.
+
+- `src/balance_visualization.py`
+- Utilities for analyzing and visualizing class distribution and imbalance statistics.
+
+## Data Balancing & Class Imbalance
+
+This project implements comprehensive strategies to handle the **88x class imbalance** in the NIH Chest X-ray dataset:
+
+✓ **Minority class oversampling** - Increases representation of rare diseases  
+✓ **Sample-level weighting** - Effective Number of Samples method  
+✓ **Aggressive augmentation** - For minority class samples  
+✓ **Weighted evaluation metrics** - Including minority class AUC  
+✓ **Class-specific inference thresholds** - Better detection of rare diseases  
+
+**See [BALANCING.md](BALANCING.md) for detailed documentation.**
+
 ## Setup
 
 ```bash
@@ -74,15 +92,18 @@ python src/data_preprocessing.py
 Optional flags:
 
 ```bash
-python src/data_preprocessing.py --log-level INFO --train-split 0.8 --val-split 0.1 --test-split 0.1
+python src/data_preprocessing.py --log-level INFO --train-split 0.8 --val-split 0.1 --test-split 0.1 --apply-oversampling True
 ```
 
 Outputs:
 - `data/processed/data_splits.json`
-- `data/processed/train_labels.csv`
+- `data/processed/train_labels.csv` (with oversampled minority classes)
 - `data/processed/val_labels.csv`
 - `data/processed/test_labels.csv`
-- `data/processed/class_weights.json`
+- `data/processed/class_weights.json` (multiple weighting methods)
+- `data/processed/train_balance_report.json`
+- `data/processed/val_balance_report.json`
+- `data/processed/test_balance_report.json`
 
 ### Phase 2: Training
 
@@ -90,16 +111,20 @@ Outputs:
 python src/train.py
 ```
 
-Optional quick smoke run:
+Optional flags:
 
 ```bash
+# Use effective number weighting for balanced training
+python src/train.py --sample-weighting effective_num
+
+# Quick smoke run
 python src/train.py --max-train-samples 5000 --max-val-samples 1000
 ```
 
 Outputs:
 - `saved_model/best_model.keras`
 - `saved_model/final_model.keras`
-- `saved_model/training_summary.json`
+- `saved_model/training_summary.json` (includes weighting method used)
 
 ### Phase 3A: Evaluation
 
@@ -108,7 +133,13 @@ python src/evaluate.py
 ```
 
 Output:
-- `data/processed/evaluation_report.json`
+- `data/processed/evaluation_report.json` (includes class balance statistics and weighted metrics)
+
+Key metrics reported:
+- `micro_auc`: Overall performance across all predictions
+- `macro_auc`: Unweighted average (better for imbalanced data)
+- `weighted_auc`: Frequency-weighted AUC (accounts for class imbalance)
+- `minority_class_auc`: Performance on rare diseases specifically
 
 ### Phase 3B: Explainability (Grad-CAM)
 

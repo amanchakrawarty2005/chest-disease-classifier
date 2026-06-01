@@ -15,6 +15,7 @@ import tensorflow as tf
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from config import DISEASE_CLASSES, IMAGE_SIZE, MODEL_DIR, PROCESSED_DATA_DIR, RANDOM_SEED
+from balancing import get_class_balance_report
 
 LOGGER = logging.getLogger("evaluate")
 AUTOTUNE = tf.data.AUTOTUNE
@@ -82,6 +83,14 @@ def build_dataset(image_paths: np.ndarray, labels: np.ndarray, batch_size: int, 
     return ds
 
 
+def to_json_serializable(obj):
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.generic, np.integer, np.floating)):
+        return obj.item()
+    return str(obj)
+
+
 def load_trained_model(model_dir: Path) -> Tuple[tf.keras.Model, Path]:
     final_path = model_dir / "final_model.keras"
     best_path = model_dir / "best_model.keras"
@@ -114,20 +123,55 @@ def compute_per_class_metric(
 
 
 def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, threshold: float) -> Dict[str, object]:
+    """
+    Evaluate predictions with comprehensive metrics.
+    
+    Args:
+        y_true: (n_samples, n_classes) binary label matrix
+        y_prob: (n_samples, n_classes) predicted probabilities
+        threshold: Classification threshold
+    
+    Returns:
+        Dictionary with various evaluation metrics
+    """
     y_pred = (y_prob >= threshold).astype(np.float32)
 
     per_class_auc = compute_per_class_metric(y_true, y_prob, roc_auc_score)
     per_class_ap = compute_per_class_metric(y_true, y_prob, average_precision_score)
 
     valid_aucs = [value for value in per_class_auc.values() if value is not None]
+    valid_aps = [value for value in per_class_ap.values() if value is not None]
+
+    # Compute class-weighted metrics to handle imbalance
+    class_weights = np.mean(y_true, axis=0)
+    class_weights = class_weights / np.sum(class_weights)  # Normalize
+    
+    weighted_auc_scores = [
+        per_class_auc[class_name] * class_weights[idx]
+        for idx, class_name in enumerate(DISEASE_CLASSES)
+        if per_class_auc[class_name] is not None
+    ]
+    weighted_auc = float(np.sum(weighted_auc_scores)) if weighted_auc_scores else None
 
     metrics = {
         "micro_auc": float(roc_auc_score(y_true.ravel(), y_prob.ravel())),
         "macro_auc": float(np.mean(valid_aucs)) if valid_aucs else None,
+        "weighted_auc": weighted_auc,
+        "macro_ap": float(np.mean(valid_aps)) if valid_aps else None,
         "subset_accuracy": float(np.mean(np.all(y_pred == y_true, axis=1))),
         "hamming_accuracy": float(np.mean(y_pred == y_true)),
     }
 
+    # Get minority class metrics (classes with < 5% prevalence)
+    minority_indices = np.where(np.mean(y_true, axis=0) < 0.05)[0]
+    if len(minority_indices) > 0:
+        minority_auc = np.mean([
+            per_class_auc[DISEASE_CLASSES[idx]]
+            for idx in minority_indices
+            if per_class_auc[DISEASE_CLASSES[idx]] is not None
+        ])
+        metrics["minority_class_auc"] = float(minority_auc) if not np.isnan(minority_auc) else None
+    
     return {
         "threshold": threshold,
         "metrics": metrics,
@@ -172,23 +216,47 @@ def main() -> None:
     LOGGER.info("Running predictions...")
     y_prob = model.predict(dataset, verbose=1)
 
+    # Generate evaluation report
     report = evaluate_predictions(y_true, y_prob, threshold=args.threshold)
     report["test_samples"] = int(len(image_paths))
     report["model_path"] = str(model_path)
+    
+    # Add class balance information
+    balance_report = get_class_balance_report(y_true, DISEASE_CLASSES, "test")
+    report["class_balance"] = balance_report
 
     output_path = args.output_path or (args.processed_data_dir / "evaluation_report.json")
     with open(output_path, "w", encoding="utf-8") as handle:
-        json.dump(report, handle, indent=2)
+        json.dump(report, handle, indent=2, default=to_json_serializable)
 
     LOGGER.info("Evaluation complete")
-    LOGGER.info("micro_auc: %.4f", report["metrics"]["micro_auc"])
+    LOGGER.info("=" * 70)
+    LOGGER.info("METRICS SUMMARY")
+    LOGGER.info("=" * 70)
+    LOGGER.info("Micro AUC: %.4f", report["metrics"]["micro_auc"])
     macro_auc = report["metrics"]["macro_auc"]
     if macro_auc is None:
-        LOGGER.info("macro_auc: N/A (insufficient positives for all classes)")
+        LOGGER.info("Macro AUC: N/A (insufficient positives for all classes)")
     else:
-        LOGGER.info("macro_auc: %.4f", macro_auc)
-    LOGGER.info("subset_accuracy: %.4f", report["metrics"]["subset_accuracy"])
-    LOGGER.info("hamming_accuracy: %.4f", report["metrics"]["hamming_accuracy"])
+        LOGGER.info("Macro AUC: %.4f", macro_auc)
+    
+    weighted_auc = report["metrics"].get("weighted_auc")
+    if weighted_auc is not None:
+        LOGGER.info("Weighted AUC (handles class imbalance): %.4f", weighted_auc)
+    
+    minority_auc = report["metrics"].get("minority_class_auc")
+    if minority_auc is not None:
+        LOGGER.info("Minority Class AUC: %.4f", minority_auc)
+    
+    LOGGER.info("Subset Accuracy: %.4f", report["metrics"]["subset_accuracy"])
+    LOGGER.info("Hamming Accuracy: %.4f", report["metrics"]["hamming_accuracy"])
+    LOGGER.info("=" * 70)
+    LOGGER.info("CLASS BALANCE IN TEST SET")
+    LOGGER.info("=" * 70)
+    LOGGER.info("Total Samples: %d", balance_report["total_samples"])
+    LOGGER.info("Healthy Samples: %d (%.2f%%)", balance_report["healthy_samples"], balance_report["healthy_percentage"])
+    LOGGER.info("Diseased Samples: %d (%.2f%%)", balance_report["diseased_samples"], 100 - balance_report["healthy_percentage"])
+    LOGGER.info("Imbalance Ratio: %.2fx", balance_report["imbalance_ratio"])
     LOGGER.info("Report saved: %s", output_path)
 
 

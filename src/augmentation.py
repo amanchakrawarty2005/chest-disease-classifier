@@ -132,6 +132,67 @@ class ImageAugmentor:
         
         return image
     
+    def augment_image_aggressive(self, image):
+        """
+        Apply stronger augmentations for minority class samples.
+        
+        Args:
+            image: Input image (H x W for grayscale or H x W x C)
+        
+        Returns:
+            Aggressively augmented image (normalized to [0, 1])
+        """
+        if image is None:
+            return None
+        
+        image = self.normalize(image)
+        
+        # Always apply aggressive augmentations
+        # Rotation: larger angles (up to 20-25 degrees)
+        angle = np.random.uniform(-25, 25)
+        h, w = image.shape[:2]
+        M = cv2.getRotationMatrix2D((w/2, h/2), angle, 1.0)
+        if len(image.shape) == 2:
+            image = cv2.warpAffine(image, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+        else:
+            image = cv2.warpAffine(image, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+        
+        # Stronger brightness adjustment
+        brightness = np.random.uniform(0.7, 1.3)
+        image = image * brightness
+        image = np.clip(image, 0, 1)
+        
+        # Stronger contrast adjustment
+        contrast = np.random.uniform(0.7, 1.3)
+        mean = image.mean()
+        image = (image - mean) * contrast + mean
+        image = np.clip(image, 0, 1)
+        
+        # Horizontal flip
+        if np.random.random() > 0.5:
+            image = cv2.flip(image, 1)
+        
+        # Elastic deformation for variety
+        if np.random.random() > 0.5:
+            image = self._elastic_deform(image, alpha=30, sigma=3)
+        
+        return image
+    
+    def _elastic_deform(self, image, alpha=30, sigma=3):
+        """Apply elastic deformation to image."""
+        if len(image.shape) == 2:
+            h, w = image.shape
+            dx = np.random.normal(0, sigma, (h, w)) * alpha
+            dy = np.random.normal(0, sigma, (h, w)) * alpha
+            
+            x, y = np.meshgrid(np.arange(w), np.arange(h))
+            x = np.clip(x + dx, 0, w - 1).astype(np.float32)
+            y = np.clip(y + dy, 0, h - 1).astype(np.float32)
+            
+            image = cv2.remap(image, x, y, cv2.INTER_LINEAR)
+        
+        return image
+    
     def batch_augment(self, images, augment=None):
         """
         Apply augmentations to a batch of images.

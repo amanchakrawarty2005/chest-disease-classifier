@@ -7,7 +7,7 @@ import ast
 import json
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,7 @@ import tensorflow as tf
 
 from config import (
     BATCH_SIZE,
+    DISEASE_CLASSES,
     EPOCHS_PHASE1,
     EPOCHS_PHASE2,
     IMAGE_SIZE,
@@ -24,6 +25,7 @@ from config import (
     PROCESSED_DATA_DIR,
     RANDOM_SEED,
 )
+from balancing import compute_sample_weights
 from model import build_model, unfreeze_last_layers
 
 LOGGER = logging.getLogger("train")
@@ -144,15 +146,59 @@ def compile_model(model: tf.keras.Model, learning_rate: float) -> None:
     )
 
 
-def build_sample_weights(y_train: np.ndarray) -> np.ndarray:
-    """Emphasize rare positive findings without over-penalizing healthy samples."""
-    positive_fraction = np.clip(np.mean(y_train, axis=0), 1e-6, 1.0 - 1e-6)
-    class_importance = 1.0 / positive_fraction
-    class_importance = class_importance / np.mean(class_importance)
+def build_sample_weights(y_train: np.ndarray, method: str = "effective_num") -> np.ndarray:
+    """Emphasize rare positive findings without over-penalizing healthy samples.
+    
+    Args:
+        y_train: (n_samples, n_classes) binary label matrix
+        method: "inverse_frequency" or "effective_num" weighting
+    
+    Returns:
+        (n_samples,) weight array for training
+    """
+    return compute_sample_weights(y_train, method=method)
 
-    sample_weights = np.sum(y_train * class_importance[None, :], axis=1)
-    sample_weights = np.where(sample_weights > 0, sample_weights, 1.0)
-    return sample_weights.astype(np.float32)
+
+def load_class_weights(processed_data_dir: Path, method: str = "recommended") -> Optional[Dict[str, float]]:
+    """Load precomputed class weights from JSON file.
+    
+    Args:
+        processed_data_dir: Directory containing class_weights.json
+        method: Which weight method to use ("recommended", "inverse_frequency", "effective_num", "focal_loss")
+    
+    Returns:
+        Dictionary mapping class names to weights, or None if not available
+    """
+    weights_path = processed_data_dir / "class_weights.json"
+    
+    if not weights_path.exists():
+        LOGGER.warning("Class weights file not found: %s", weights_path)
+        return None
+    
+    try:
+        with open(weights_path, "r", encoding="utf-8") as f:
+            all_weights = json.load(f)
+        
+        # Try to get the requested method
+        if isinstance(all_weights, dict):
+            if method in all_weights:
+                weights = all_weights[method]
+                LOGGER.info("Loaded %s class weights from %s", method, weights_path)
+                return weights
+            elif "recommended" in all_weights:
+                # Fallback to recommended weights
+                weights = all_weights["recommended"]
+                LOGGER.info("Loaded recommended class weights (fallback from requested method '%s')", method)
+                return weights
+            else:
+                # Old format - assume it's the weights dict itself
+                LOGGER.info("Loaded class weights (legacy format)")
+                return all_weights
+        
+        return None
+    except Exception as exc:
+        LOGGER.error("Failed to load class weights: %s", exc)
+        return None
 
 
 def save_training_summary(summary_path: Path, args: argparse.Namespace, train_size: int, val_size: int) -> None:
@@ -165,6 +211,7 @@ def save_training_summary(summary_path: Path, args: argparse.Namespace, train_si
         "epochs_phase2": int(args.epochs_phase2),
         "lr_phase1": float(args.lr_phase1),
         "lr_phase2": float(args.lr_phase2),
+        "sample_weighting_method": str(args.sample_weighting),
     }
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
@@ -180,6 +227,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs-phase2", type=int, default=EPOCHS_PHASE2, help="Epochs for fine-tuning stage")
     parser.add_argument("--lr-phase1", type=float, default=LEARNING_RATE_PHASE1, help="Learning rate for stage 1")
     parser.add_argument("--lr-phase2", type=float, default=LEARNING_RATE_PHASE2, help="Learning rate for stage 2")
+    parser.add_argument("--sample-weighting", type=str, default="effective_num", choices=["effective_num", "inverse_frequency"], help="Sample weighting method for imbalanced data")
     parser.add_argument("--max-train-samples", type=int, default=None, help="Optional cap for quick smoke runs")
     parser.add_argument("--max-val-samples", type=int, default=None, help="Optional cap for quick smoke runs")
     parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed")
@@ -208,7 +256,8 @@ def main() -> None:
         seed=args.seed,
     )
 
-    train_sample_weights = build_sample_weights(y_train)
+    LOGGER.info("Computing sample weights using '%s' method...", args.sample_weighting)
+    train_sample_weights = build_sample_weights(y_train, method=args.sample_weighting)
 
     train_ds = build_dataset(
         train_paths,
