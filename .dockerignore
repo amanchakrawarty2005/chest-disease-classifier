@@ -16,5 +16,4 @@ notebooks
 tests
 data/raw
 data/processed
-saved_model
 mlruns
