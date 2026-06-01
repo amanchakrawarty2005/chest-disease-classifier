@@ -119,6 +119,64 @@ python src/gradcam.py
 Output folder:
 - `data/processed/gradcam/`
 
+### Phase 4: FastAPI Inference Service
+
+Run API:
+
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Available endpoints:
+- `GET /`
+- `GET /health`
+- `POST /predict` (multipart form-data, field name: `file`)
+
+Example test (PowerShell):
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/predict?threshold=0.5&top_k=5" `
+  -F "file=@D:\path\to\xray.png"
+```
+
+### Phase 5: Streamlit Dashboard
+
+Run dashboard:
+
+```bash
+streamlit run dashboard/app.py
+```
+
+What it provides:
+- Upload chest X-ray image
+- Set prediction threshold and top-k
+- Call FastAPI `/predict` endpoint
+- View top predictions and full probability chart
+- Show existing Grad-CAM match (if available in `data/processed/gradcam/`)
+
+### Phase 6: Docker + CI/CD
+
+Build and run with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Services:
+- API: `http://127.0.0.1:8000`
+- Dashboard: `http://127.0.0.1:8501`
+
+Docker files:
+- `Dockerfile.api`
+- `Dockerfile.dashboard`
+- `docker-compose.yml`
+- `.dockerignore`
+
+CI workflow:
+- `.github/workflows/ci.yml`
+- Runs on push/PR to `main`
+- Performs syntax checks and unit tests
+
 ## Current Laptop-Friendly Defaults
 
 Configured in `src/config.py` for lower-memory environments:
