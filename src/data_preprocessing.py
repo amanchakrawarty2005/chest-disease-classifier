@@ -211,7 +211,7 @@ class NIHPreprocessor:
                 train_df,
                 original_train_labels,
                 DISEASE_CLASSES,
-                target_ratio=0.25,
+                target_ratio=1.0,
                 seed=self.seed,
             )
         else:

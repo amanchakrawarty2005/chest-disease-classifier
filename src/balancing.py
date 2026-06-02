@@ -50,7 +50,7 @@ def compute_balanced_class_weights(
         for idx, class_name in enumerate(class_names):
             positive_count = int(np.sum(train_labels[:, idx]))
             positive_count = max(positive_count, 1)
-            weight = float(total_samples / (num_classes * positive_count))
+            weight = float(total_samples / positive_count)
             weights[class_name] = weight
 
     elif method == "effective_num":
@@ -76,22 +76,15 @@ def compute_balanced_class_weights(
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    # Normalize weights to prevent extreme values
-    weight_values = np.array(list(weights.values()))
-    max_weight = weight_values.max()
-    min_weight = weight_values.min()
-    
-    # Scale to reasonable range [0.1, 10]
-    if max_weight > min_weight:
-        scaled_weights = {}
-        for class_name, weight in weights.items():
-            normalized = (weight - min_weight) / (max_weight - min_weight)
-            # Map to [smoothing, 10*smoothing]
-            scaled = normalized * (10 * smoothing - smoothing) + smoothing
-            scaled_weights[class_name] = float(scaled)
-        weights = scaled_weights
+    # Normalize weights so the average weight is 1.0 and clamp extremes
+    weight_values = np.array(list(weights.values()), dtype=np.float32)
+    mean_weight = float(np.mean(weight_values)) if weight_values.size else 1.0
+    normalized_weights: Dict[str, float] = {}
+    for class_name, weight in weights.items():
+        normalized = float(weight / max(mean_weight, 1e-6))
+        normalized_weights[class_name] = float(np.clip(normalized, 0.1, 10.0))
 
-    return weights
+    return normalized_weights
 
 
 def compute_sample_weights(
@@ -195,7 +188,7 @@ def oversample_minority_classes(
     df: pd.DataFrame,
     labels: np.ndarray,
     class_names: List[str],
-    target_ratio: float = 0.3,
+    target_ratio: float = 1.0,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, np.ndarray]:
     """
@@ -225,35 +218,30 @@ def oversample_minority_classes(
     for class_idx, class_name in enumerate(class_names):
         class_indices = np.where(labels[:, class_idx] == 1)[0]
         current_count = len(class_indices)
-        
+
         if current_count > 0 and current_count < target_count:
             # Calculate how many samples to add
             samples_needed = target_count - current_count
-            
-            # Randomly select indices to duplicate
+
             if samples_needed > 0:
                 selected = rng.choice(class_indices, size=samples_needed, replace=True)
                 indices_to_add.extend(selected)
-    
+
     if not indices_to_add:
         LOGGER.info("No oversampling needed - classes are already balanced")
         return df, labels
-    
-    # Remove duplicates while preserving order effect
-    unique_indices = list(set(indices_to_add))
-    
-    LOGGER.info("Oversampling %d samples from minority classes", len(unique_indices))
-    
-    # Append oversampled data
-    oversampled_df = pd.concat(
-        [df, df.iloc[unique_indices]],
-        ignore_index=True,
-    )
-    oversampled_labels = np.vstack([
-        labels,
-        labels[unique_indices],
-    ])
-    
+
+    LOGGER.info("Oversampling %d duplicate records from minority classes", len(indices_to_add))
+
+    # Append oversampled data and shuffle the resulting training set
+    oversampled_df = pd.concat([df, df.iloc[indices_to_add]], ignore_index=True)
+    oversampled_labels = np.vstack([labels, labels[indices_to_add]])
+
+    shuffled_indices = np.arange(len(oversampled_df))
+    rng.shuffle(shuffled_indices)
+    oversampled_df = oversampled_df.iloc[shuffled_indices].reset_index(drop=True)
+    oversampled_labels = oversampled_labels[shuffled_indices]
+
     return oversampled_df, oversampled_labels
 
 

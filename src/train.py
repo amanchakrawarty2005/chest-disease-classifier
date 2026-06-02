@@ -146,7 +146,7 @@ def compile_model(model: tf.keras.Model, learning_rate: float) -> None:
     )
 
 
-def build_sample_weights(y_train: np.ndarray, method: str = "effective_num") -> np.ndarray:
+def build_sample_weights(y_train: np.ndarray, method: str = "inverse_frequency") -> np.ndarray:
     """Emphasize rare positive findings without over-penalizing healthy samples.
     
     Args:
@@ -227,7 +227,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs-phase2", type=int, default=EPOCHS_PHASE2, help="Epochs for fine-tuning stage")
     parser.add_argument("--lr-phase1", type=float, default=LEARNING_RATE_PHASE1, help="Learning rate for stage 1")
     parser.add_argument("--lr-phase2", type=float, default=LEARNING_RATE_PHASE2, help="Learning rate for stage 2")
-    parser.add_argument("--sample-weighting", type=str, default="effective_num", choices=["effective_num", "inverse_frequency"], help="Sample weighting method for imbalanced data")
+    parser.add_argument("--sample-weighting", type=str, default="inverse_frequency", choices=["effective_num", "inverse_frequency"], help="Sample weighting method for imbalanced data")
     parser.add_argument("--max-train-samples", type=int, default=None, help="Optional cap for quick smoke runs")
     parser.add_argument("--max-val-samples", type=int, default=None, help="Optional cap for quick smoke runs")
     parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed")

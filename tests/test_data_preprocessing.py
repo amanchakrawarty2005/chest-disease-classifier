@@ -10,6 +10,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from balancing import oversample_minority_classes
 from data_preprocessing import (  # noqa: E402
     compute_class_weights,
     parse_finding_labels,
@@ -56,3 +57,28 @@ def test_compute_class_weights_produces_inverse_frequency_behavior():
     assert set(weights.keys()) == set(class_names)
     assert weights["B"] > weights["A"]  # rarer positive class gets higher weight
     assert weights["C"] > 0  # zero-positive class still has finite fallback weight
+
+
+def test_oversample_minority_classes_balances_rare_labels():
+    labels = np.array(
+        [
+            [1, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+        ],
+        dtype=np.float32,
+    )
+    df = pd.DataFrame({"Image Index": ["a", "b", "c", "d"]})
+    oversampled_df, oversampled_labels = oversample_minority_classes(
+        df,
+        labels,
+        ["A", "B", "C"],
+        target_ratio=1.0,
+        seed=123,
+    )
+
+    counts = np.sum(oversampled_labels, axis=0)
+    assert counts[0] == counts[1] == counts[2]
+    assert len(oversampled_df) == len(oversampled_labels)
+    assert len(oversampled_df) >= len(df)
