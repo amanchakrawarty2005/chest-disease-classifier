@@ -14,7 +14,7 @@ SRC_DIR = BASE_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from config import (  
+from config import (
     API_DESCRIPTION,
     API_TITLE,
     API_VERSION,
@@ -23,8 +23,8 @@ from config import (
     MODEL_DIR,
 )
 
-from api.inference import ChestXrayInferenceService  
-from api.schemas import HealthResponse, PredictResponse  
+from api.inference import ChestXrayInferenceService
+from api.schemas import HealthResponse, PredictResponse
 
 LOGGER = logging.getLogger("api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     try:
         model_path = inference_service.load_model()
         LOGGER.info("Startup complete. Loaded model: %s", model_path)
-    except Exception as exc:  
+    except Exception as exc:
         LOGGER.error("Model not loaded at startup: %s", exc)
     yield
 
@@ -113,7 +113,7 @@ async def predict(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except Exception as exc:  
+    except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Inference error: {exc}") from exc
 
     top_predictions, all_predictions, predicted_labels = service.format_predictions(

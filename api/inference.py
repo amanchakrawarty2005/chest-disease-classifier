@@ -44,7 +44,7 @@ class ChestXrayInferenceService:
 
         path = self.resolve_model_path()
         LOGGER.info("Loading model from %s", path)
-        self._model = tf.keras.models.load_model(path)
+        self._model = tf.keras.models.load_model(path, compile=False)
         self._model_path = path
         return path
 
