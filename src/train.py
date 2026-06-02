@@ -80,7 +80,10 @@ def decode_image(path: tf.Tensor, label: tf.Tensor, sample_weight: tf.Tensor, im
     image_bytes = tf.io.read_file(path)
     image = tf.io.decode_image(image_bytes, channels=1, expand_animations=False)
     image = tf.image.resize(image, [image_size, image_size], method="bilinear")
-    image = tf.cast(image, tf.float32) / 255.0
+    
+    image = tf.image.per_image_standardization(image)
+    image = (image - tf.reduce_min(image)) / (tf.reduce_max(image) - tf.reduce_min(image) + 1e-6)
+    
     image = tf.image.grayscale_to_rgb(image)
     image.set_shape([image_size, image_size, 3])
     return image, label, sample_weight
@@ -136,10 +139,23 @@ def build_callbacks(model_dir: Path, patience: int = 4):
     ]
 
 
-def compile_model(model: tf.keras.Model, learning_rate: float) -> None:
+def get_weighted_bce_loss(class_weights_dict: dict, class_names: list):
+    weights_array = np.array([class_weights_dict[name] for name in class_names], dtype=np.float32)
+    weights_tensor = tf.convert_to_tensor(weights_array, dtype=tf.float32)
+
+    def weighted_bce(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
+        bce = -y_true * tf.math.log(y_pred) - (1.0 - y_true) * tf.math.log(1.0 - y_pred)
+        weighted_bce_val = bce * weights_tensor
+        return tf.reduce_mean(weighted_bce_val, axis=-1)
+        
+    return weighted_bce
+
+
+def compile_model(model: tf.keras.Model, learning_rate: float, loss_fn="binary_crossentropy") -> None:
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-        loss="binary_crossentropy",
+        loss=loss_fn,
         metrics=[tf.keras.metrics.AUC(name="auc", multi_label=True)],
     )
 
@@ -254,14 +270,21 @@ def main() -> None:
 
     callbacks = build_callbacks(args.model_dir)
 
+    LOGGER.info("Loading pre-calculated 'effective_num' class weights matrix...")
+    class_weights_dict = load_class_weights(args.processed_data_dir, method="effective_num")
+    if class_weights_dict is None:
+        raise RuntimeError("Could not load class weights. Run data_preprocessing.py first!")
+    
+    balanced_loss_fn = get_weighted_bce_loss(class_weights_dict, DISEASE_CLASSES)
+
     LOGGER.info("Phase 2.1 | Training classifier head (frozen backbone)")
     model = build_model(freeze_backbone=True)
-    compile_model(model, args.lr_phase1)
+    compile_model(model, args.lr_phase1, loss_fn=balanced_loss_fn)
     model.fit(train_ds, validation_data=val_ds, epochs=args.epochs_phase1, callbacks=callbacks, verbose=1)
 
     LOGGER.info("Phase 2.2 | Fine-tuning last backbone layers")
     model = unfreeze_last_layers(model)
-    compile_model(model, args.lr_phase2)
+    compile_model(model, args.lr_phase2, loss_fn=balanced_loss_fn)
     model.fit(train_ds, validation_data=val_ds, epochs=args.epochs_phase2, callbacks=callbacks, verbose=1)
 
     final_path = args.model_dir / "final_model.keras"
