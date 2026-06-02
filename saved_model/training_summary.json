@@ -3,7 +3,7 @@
   "val_samples": 11212,
   "batch_size": 8,
   "image_size": 224,
-  "epochs_phase1": 1,
+  "epochs_phase1": 2,
   "epochs_phase2": 1,
   "lr_phase1": 0.001,
   "lr_phase2": 1e-05,

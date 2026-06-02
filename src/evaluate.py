@@ -89,14 +89,53 @@ def to_json_serializable(obj):
     return str(obj)
 
 
-def load_trained_model(model_dir: Path) -> Tuple[tf.keras.Model, Path]:
+def get_weighted_bce_loss(class_weights_dict: dict, class_names: list):
+    weights_array = np.array([class_weights_dict[name] for name in class_names], dtype=np.float32)
+    weights_tensor = tf.convert_to_tensor(weights_array, dtype=tf.float32)
+
+    def weighted_bce(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
+        bce = -y_true * tf.math.log(y_pred) - (1.0 - y_true) * tf.math.log(1.0 - y_pred)
+        weighted_bce_val = bce * weights_tensor
+        return tf.reduce_mean(weighted_bce_val, axis=-1)
+        
+    return weighted_bce
+
+
+def load_class_weights(processed_data_dir: Path, method: str = "recommended") -> Optional[Dict[str, float]]:
+    weights_path = processed_data_dir / "class_weights.json"
+    if not weights_path.exists():
+        return None
+    try:
+        with open(weights_path, "r", encoding="utf-8") as f:
+            all_weights = json.load(f)
+        if isinstance(all_weights, dict):
+            if method in all_weights:
+                return all_weights[method]
+            elif "recommended" in all_weights:
+                return all_weights["recommended"]
+            else:
+                return all_weights
+        return None
+    except Exception:
+        return None
+
+
+def load_trained_model(model_dir: Path, processed_data_dir: Path) -> Tuple[tf.keras.Model, Path]:
     final_path = model_dir / "final_model.keras"
     best_path = model_dir / "best_model.keras"
+    
+    class_weights_dict = load_class_weights(processed_data_dir, method="effective_num")
+    if class_weights_dict is None:
+        raise RuntimeError("Class weights file not found. Ensure preprocessing ran successfully.")
+    
+    loss_fn = get_weighted_bce_loss(class_weights_dict, DISEASE_CLASSES)
+    custom_objects = {"weighted_bce": loss_fn}
 
     if final_path.exists():
-        return tf.keras.models.load_model(final_path), final_path
+        return tf.keras.models.load_model(final_path, custom_objects=custom_objects), final_path
     if best_path.exists():
-        return tf.keras.models.load_model(best_path), best_path
+        return tf.keras.models.load_model(best_path, custom_objects=custom_objects), best_path
 
     raise FileNotFoundError("No trained model found. Expected final_model.keras or best_model.keras.")
 
@@ -167,15 +206,15 @@ def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, threshold: floa
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Evaluate trained chest disease classifier on test split.")
-    parser.add_argument("--processed-data-dir", type=Path, default=Path(PROCESSED_DATA_DIR), help="Directory containing test_labels.csv")
-    parser.add_argument("--model-dir", type=Path, default=Path(MODEL_DIR), help="Directory containing trained model files")
-    parser.add_argument("--output-path", type=Path, default=None, help="Optional explicit output JSON path")
-    parser.add_argument("--image-size", type=int, default=IMAGE_SIZE, help="Evaluation image size")
-    parser.add_argument("--batch-size", type=int, default=16, help="Batch size for model.predict")
-    parser.add_argument("--threshold", type=float, default=0.5, help="Threshold for converting probabilities to binary predictions")
-    parser.add_argument("--max-samples", type=int, default=None, help="Optional cap for quick evaluation runs")
-    parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed for sampling")
-    parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
+    parser.add_argument("--processed-data-dir", type=Path, default=Path(PROCESSED_DATA_DIR))
+    parser.add_argument("--model-dir", type=Path, default=Path(MODEL_DIR))
+    parser.add_argument("--output-path", type=Path, default=None)
+    parser.add_argument("--image-size", type=int, default=IMAGE_SIZE)
+    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
+    parser.add_argument("--log-level", type=str, default="INFO")
     return parser
 
 
@@ -195,7 +234,7 @@ def main() -> None:
         image_size=args.image_size,
     )
 
-    model, model_path = load_trained_model(args.model_dir)
+    model, model_path = load_trained_model(args.model_dir, args.processed_data_dir)
     LOGGER.info("Loaded model: %s", model_path)
 
     LOGGER.info("Running predictions...")
