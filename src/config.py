@@ -75,12 +75,12 @@ BACKBONE_TRAINABLE_LAYERS = 10  # Laptop-safe: unfreeze fewer layers for lower V
 
 # Training - Phase 1: Frozen backbone, train custom head
 BATCH_SIZE = 8
-EPOCHS_PHASE1 = 3
+EPOCHS_PHASE1 = 2
 LEARNING_RATE_PHASE1 = 1e-3
 OPTIMIZER_PHASE1 = "adam"
 
 # Training - Phase 2: Fine-tune entire model
-EPOCHS_PHASE2 = 2
+EPOCHS_PHASE2 = 1
 LEARNING_RATE_PHASE2 = 1e-5
 OPTIMIZER_PHASE2 = "adam"
 

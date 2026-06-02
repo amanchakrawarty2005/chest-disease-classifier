@@ -212,8 +212,8 @@ CI workflow:
 
 Configured in `src/config.py` for lower-memory environments:
 - `BATCH_SIZE = 8`
-- `EPOCHS_PHASE1 = 3`
-- `EPOCHS_PHASE2 = 2`
+- `EPOCHS_PHASE1 = 2`
+- `EPOCHS_PHASE2 = 1`
 - `BACKBONE_TRAINABLE_LAYERS = 10`
 
 ## Notes
