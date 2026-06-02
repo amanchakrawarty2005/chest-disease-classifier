@@ -195,20 +195,20 @@ def save_training_summary(summary_path: Path, args: argparse.Namespace, train_si
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train chest disease classifier with 2-stage fine-tuning.")
-    parser.add_argument("--processed-data-dir", type=Path, default=Path(PROCESSED_DATA_DIR), help="Directory containing train_labels.csv and val_labels.csv")
-    parser.add_argument("--model-dir", type=Path, default=Path(MODEL_DIR), help="Directory to save model checkpoints")
-    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="Batch size")
-    parser.add_argument("--image-size", type=int, default=IMAGE_SIZE, help="Input image size")
-    parser.add_argument("--epochs-phase1", type=int, default=EPOCHS_PHASE1, help="Epochs for frozen-backbone stage")
-    parser.add_argument("--epochs-phase2", type=int, default=EPOCHS_PHASE2, help="Epochs for fine-tuning stage")
-    parser.add_argument("--lr-phase1", type=float, default=LEARNING_RATE_PHASE1, help="Learning rate for stage 1")
-    parser.add_argument("--lr-phase2", type=float, default=LEARNING_RATE_PHASE2, help="Learning rate for stage 2")
-    parser.add_argument("--sample-weighting", type=str, default="inverse_frequency", choices=["effective_num", "inverse_frequency"], help="Sample weighting method for imbalanced data")
-    parser.add_argument("--max-train-samples", type=int, default=None, help="Optional cap for quick smoke runs")
-    parser.add_argument("--max-val-samples", type=int, default=None, help="Optional cap for quick smoke runs")
-    parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed")
-    parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--processed-data-dir", type=Path, default=Path(PROCESSED_DATA_DIR))
+    parser.add_argument("--model-dir", type=Path, default=Path(MODEL_DIR))
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--image-size", type=int, default=IMAGE_SIZE)
+    parser.add_argument("--epochs-phase1", type=int, default=EPOCHS_PHASE1)
+    parser.add_argument("--epochs-phase2", type=int, default=EPOCHS_PHASE2)
+    parser.add_argument("--lr-phase1", type=float, default=LEARNING_RATE_PHASE1)
+    parser.add_argument("--lr-phase2", type=float, default=LEARNING_RATE_PHASE2)
+    parser.add_argument("--sample-weighting", type=str, default="inverse_frequency", choices=["effective_num", "inverse_frequency"])
+    parser.add_argument("--max-train-samples", type=int, default=None)
+    parser.add_argument("--max-val-samples", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
+    parser.add_argument("--log-level", type=str, default="INFO")
     return parser
 
 

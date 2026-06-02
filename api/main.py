@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
         model_path = inference_service.load_model()
         LOGGER.info("Startup complete. Loaded model: %s", model_path)
     except Exception as exc:  
-        LOGGER.error("Startup warning: model could not be loaded yet (%s)", exc)
+        LOGGER.error("Model not loaded at startup: %s", exc)
     yield
 
 
@@ -94,17 +94,16 @@ async def predict(
 ) -> PredictResponse:
     service: ChestXrayInferenceService = request.app.state.inference_service
 
-    allowed_non_image_types = {"application/octet-stream"}
-    incoming_type = (file.content_type or "").lower()
-    if incoming_type and (not incoming_type.startswith("image/")) and incoming_type not in allowed_non_image_types:
+    content_type = (file.content_type or "").lower()
+    if content_type and not content_type.startswith("image/") and content_type != "application/octet-stream":
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported content type: {file.content_type}. Please upload an image file.",
+            detail=f"Expected an image, got {file.content_type}",
         )
 
     raw_bytes = await file.read()
     if not raw_bytes:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file.")
 
     try:
         start = time.perf_counter()

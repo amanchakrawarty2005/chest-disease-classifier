@@ -1,6 +1,5 @@
 import os
 import sys
-from PIL import report
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -35,16 +34,16 @@ class ChestXrayEDA:
         print("="*70)
         
         if not self.csv_path.exists():
-            raise FileNotFoundError(f"❌ Dataset not found at {self.csv_path}")
+            raise FileNotFoundError(f"ERR Dataset not found at {self.csv_path}")
         
         try:
             self.df = pd.read_csv(self.csv_path)
-            print(f"✅ Loaded dataset: {self.csv_path}")
+            print(f"OK Loaded dataset: {self.csv_path}")
             print(f"   Shape: {self.df.shape}")
             print(f"   Columns: {list(self.df.columns)}")
             return self.df
         except Exception as e:
-            print(f"❌ Error loading dataset: {e}")
+            print(f"ERR Error loading dataset: {e}")
             raise
     
     def parse_diseases(self, finding_labels):
@@ -67,7 +66,7 @@ class ChestXrayEDA:
         self.df['diseases'] = self.df[self.df.columns[1]].apply(self.parse_diseases)
         self.df['num_diseases'] = self.df['diseases'].apply(len)
         
-        print(f"   ✅ Disease parsing complete")
+        print(f"   OK Disease parsing complete")
         
         print(f"\n📈 Disease Statistics:")
         print(f"   Images with No Finding: {(self.df['num_diseases'] == 0).sum():,}")
@@ -133,7 +132,7 @@ class ChestXrayEDA:
         weights_path = self.output_dir / "class_weights.json"
         with open(weights_path, 'w') as f:
             json.dump(class_weights, f, indent=2)
-        print(f"\n✅ Class weights saved to {weights_path}")
+        print(f"\nOK Class weights saved to {weights_path}")
         
         return class_weights
     
@@ -247,7 +246,7 @@ class ChestXrayEDA:
         print(f"   ` Saved to {fig_path}")
         plt.close()
         
-        print("\n✅ All visualizations generated!")
+        print("\nOK All visualizations generated!")
         return True
     
     def generate_summary_report(self):
@@ -311,7 +310,7 @@ Imbalance Ratio:           {sorted(self.disease_counts.items(), key=lambda x: x[
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
         
-        print(f"\n✅ Report saved to {report_path}")
+        print(f"\nOK Report saved to {report_path}")
     
     def run_full_eda(self):
         print("\n")
@@ -332,7 +331,7 @@ Imbalance Ratio:           {sorted(self.disease_counts.items(), key=lambda x: x[
             self.generate_summary_report()
             
             print("\n" + "="*70)
-            print("✅ EDA COMPLETE!")
+            print("OK EDA COMPLETE!")
             print("="*70)
             print(f"\n📁 Output files saved to: {self.output_dir}")
             print(f"\n🚀 Next step: python src/data_preprocessing.py\n")
@@ -340,7 +339,7 @@ Imbalance Ratio:           {sorted(self.disease_counts.items(), key=lambda x: x[
             return True
             
         except Exception as e:
-            print(f"\n❌ Error during EDA: {e}")
+            print(f"\nERR Error during EDA: {e}")
             import traceback
             traceback.print_exc()
             return False

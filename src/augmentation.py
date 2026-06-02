@@ -171,20 +171,9 @@ class TestTimeAugmentation:
 
 
 if __name__ == "__main__":
-    print("Image Augmentation Module")
-    print("=" * 50)
-    
     augmentor = ImageAugmentor(image_size=224, augment=True)
-    print("✅ ImageAugmentor created")
-    
-    dummy_image = np.random.randint(0, 256, (256, 256), dtype=np.uint8)
-    print("✅ Dummy image created: shape =", dummy_image.shape)
-    
-    augmented = augmentor.augment_image(dummy_image)
-    print("✅ Augmentation applied: shape =", augmented.shape)
-    print("   Min value: {:.3f}, Max value: {:.3f}".format(augmented.min(), augmented.max()))
-    
-    print("\nTesting Test-Time Augmentation...")
+    dummy = np.random.randint(0, 256, (256, 256), dtype=np.uint8)
+    aug = augmentor.augment_image(dummy)
+    print("augmented", aug.shape, aug.min(), aug.max())
     tta = TestTimeAugmentation(num_augmentations=5)
-    tta_images = tta.apply_tta(dummy_image)
-    print(f"✅ TTA generated {len(tta_images)} augmented versions")
+    print("tta count", len(tta.apply_tta(dummy)))

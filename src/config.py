@@ -71,7 +71,7 @@ API_HOST = "0.0.0.0"
 API_PORT = 8000
 API_TITLE = "Chest Disease Classifier API"
 API_VERSION = "1.0.0"
-API_DESCRIPTION = "Multi-label chest disease classification from X-ray images"
+API_DESCRIPTION = "Chest X-ray multi-label classification"
 
 STREAMLIT_PAGE_TITLE = "Chest Disease Classifier Dashboard"
 STREAMLIT_LAYOUT = "wide"
@@ -84,7 +84,5 @@ LOG_LEVEL = "INFO"
 DEBUG_MODE = False
 
 if DEBUG_MODE:
-    print(f"✅ Configuration loaded from {__file__}")
-    print(f"Base directory: {BASE_DIR}")
-    print(f"Number of disease classes: {NUM_CLASSES}")
-    print(f"Image size: {IMAGE_SIZE}x{IMAGE_SIZE}")
+    print(f"config: {__file__}")
+    print(f"base: {BASE_DIR}, classes: {NUM_CLASSES}, size: {IMAGE_SIZE}")

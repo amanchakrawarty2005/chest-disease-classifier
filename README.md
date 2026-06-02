@@ -29,7 +29,7 @@ End-to-end multi-label chest X-ray classification project built on the NIH Chest
 - Performs EDA and creates visual/statistical summaries.
 
 - `src/data_preprocessing.py`
-- Parses labels, creates multi-hot targets, handles robust splitting, saves split metadata files.
+- Parses labels, builds multi-hot targets, writes train/val/test CSVs.
 
 - `src/model.py`
 - Defines EfficientNetB0 classifier architecture and fine-tuning layer-unfreeze logic.
@@ -44,22 +44,14 @@ End-to-end multi-label chest X-ray classification project built on the NIH Chest
 - Generates Grad-CAM overlays for sampled test images.
 
 - `src/balancing.py`
-- Comprehensive class imbalance handling: weighted sampling, oversampling, and balanced metrics.
+- Oversampling, sample weights, class weight JSON.
 
 - `src/balance_visualization.py`
-- Utilities for analyzing and visualizing class distribution and imbalance statistics.
+- Balance stats and text summaries.
 
-## Data Balancing & Class Imbalance
+## Class imbalance
 
-This project implements comprehensive strategies to handle the **88x class imbalance** in the NIH Chest X-ray dataset:
-
-✓ **Minority class oversampling** - Increases representation of rare diseases  
-✓ **Sample-level weighting** - Effective Number of Samples method  
-✓ **Aggressive augmentation** - For minority class samples  
-✓ **Weighted evaluation metrics** - Including minority class AUC  
-✓ **Class-specific inference thresholds** - Better detection of rare diseases  
-
-**See [BALANCING.md](BALANCING.md) for detailed documentation.**
+NIH labels are heavily skewed. Preprocessing can oversample rare classes; training uses sample weights; evaluation can weight metrics by class frequency. See `BALANCING.md` if present.
 
 ## Setup
 

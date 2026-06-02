@@ -1,16 +1,14 @@
-"""Pydantic schemas for the Chest Disease FastAPI service."""
-
 from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class PredictionItem(BaseModel):
-    disease: str = Field(..., description="Disease class name")
-    probability: float = Field(..., ge=0.0, le=1.0, description="Predicted probability")
-    predicted: bool = Field(..., description="True when probability >= threshold")
+    disease: str
+    probability: float
+    predicted: bool
 
 
 class HealthResponse(BaseModel):
@@ -23,9 +21,9 @@ class HealthResponse(BaseModel):
 
 class PredictResponse(BaseModel):
     filename: Optional[str] = None
-    threshold: float = Field(..., ge=0.0, le=1.0)
-    top_k: int = Field(..., ge=1)
+    threshold: float
+    top_k: int
     predicted_labels: List[str]
     top_predictions: List[PredictionItem]
     all_predictions: List[PredictionItem]
-    inference_ms: float = Field(..., ge=0.0)
+    inference_ms: float
