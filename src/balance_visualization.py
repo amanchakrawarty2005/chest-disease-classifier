@@ -1,9 +1,3 @@
-"""
-Visualization and reporting utilities for class balance analysis.
-
-Provides tools to visualize and report on dataset class distribution and imbalance.
-"""
-
 from __future__ import annotations
 
 import json
@@ -14,16 +8,6 @@ import numpy as np
 
 
 def generate_balance_summary(balance_reports: Dict[str, Dict], output_path: Optional[Path] = None) -> str:
-    """
-    Generate a human-readable summary of class balance across all splits.
-    
-    Args:
-        balance_reports: Dictionary mapping split names to balance report dictionaries
-        output_path: Optional path to save the summary
-    
-    Returns:
-        Formatted string summary
-    """
     summary_lines = []
     summary_lines.append("=" * 80)
     summary_lines.append("DATASET CLASS BALANCE ANALYSIS")
@@ -32,20 +16,19 @@ def generate_balance_summary(balance_reports: Dict[str, Dict], output_path: Opti
     for split_name, report in balance_reports.items():
         summary_lines.append(f"\n{split_name.upper()} SPLIT")
         summary_lines.append("-" * 80)
-        summary_lines.append(f"Total Samples: {report['total_samples']:,}")
-        summary_lines.append(f"Healthy Samples: {report['healthy_samples']:,} ({report['healthy_percentage']:.2f}%)")
-        summary_lines.append(f"Diseased Samples: {report['diseased_samples']:,} ({100 - report['healthy_percentage']:.2f}%)")
+        summary_lines.append(f"Total Samples: {report['total_samples']:}")
+        summary_lines.append(f"Healthy Samples: {report['healthy_samples']:} ({report['healthy_percentage']:.2f}%)")
+        summary_lines.append(f"Diseased Samples: {report['diseased_samples']:} ({100 - report['healthy_percentage']:.2f}%)")
         summary_lines.append(f"Imbalance Ratio: {report['imbalance_ratio']:.2f}x")
         summary_lines.append(f"\nClass Distribution:")
         
-        # Sort classes by count (descending)
         class_dist = report["class_distribution"]
         sorted_classes = sorted(class_dist.items(), key=lambda x: x[1]["count"], reverse=True)
         
         for disease, stats in sorted_classes:
             count = stats["count"]
             percentage = stats["percentage"]
-            bar_length = int(percentage / 2)  # Max 50% width
+            bar_length = int(percentage / 2)
             bar = "█" * bar_length + "░" * (50 - bar_length)
             summary_lines.append(f"  {disease:25} | {count:6} ({percentage:6.2f}%) | {bar}")
     
@@ -74,12 +57,6 @@ def compare_class_frequencies(
     val_report: Dict,
     test_report: Dict,
 ) -> Dict[str, Dict[str, float]]:
-    """
-    Compare class frequencies across train/val/test splits.
-    
-    Returns:
-        Dictionary mapping disease names to frequency dictionaries
-    """
     comparison = {}
     
     train_dist = train_report["class_distribution"]
@@ -106,17 +83,6 @@ def identify_critical_classes(
     min_samples_threshold: int = 100,
     max_frequency_threshold: float = 0.05,
 ) -> List[str]:
-    """
-    Identify classes that need special handling.
-    
-    Args:
-        balance_report: Class balance report dictionary
-        min_samples_threshold: Minimum samples to not be critical
-        max_frequency_threshold: Max percentage to not be critical
-    
-    Returns:
-        List of critical disease class names
-    """
     critical = []
     class_dist = balance_report["class_distribution"]
     
@@ -134,16 +100,6 @@ def generate_weight_adjustment_report(
     class_weights: Dict[str, float],
     class_distribution: Dict[str, Dict],
 ) -> Dict[str, object]:
-    """
-    Generate a report showing how class weights adjust for imbalance.
-    
-    Args:
-        class_weights: Dictionary of class weights
-        class_distribution: Dictionary of class distribution statistics
-    
-    Returns:
-        Report dictionary with weight adjustment analysis
-    """
     report = {
         "total_classes": len(class_weights),
         "weight_statistics": {
@@ -168,6 +124,5 @@ def generate_weight_adjustment_report(
 
 
 def print_balance_summary(balance_reports: Dict[str, Dict]) -> None:
-    """Print formatted balance summary to console."""
     summary = generate_balance_summary(balance_reports)
     print(summary)

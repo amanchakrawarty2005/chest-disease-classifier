@@ -1,13 +1,3 @@
-"""
-Data balancing strategies for handling class imbalance in multi-label classification.
-
-Implements:
-- Class weight computation (inverse-frequency and focal-loss based)
-- Stratified sampling with minority class preservation
-- Oversampling for minority classes
-- Class balance analysis and reporting
-"""
-
 from __future__ import annotations
 
 import json
@@ -27,18 +17,6 @@ def compute_balanced_class_weights(
     method: str = "inverse_frequency",
     smoothing: float = 1.0,
 ) -> Dict[str, float]:
-    """
-    Compute class weights to handle multi-label class imbalance.
-    
-    Args:
-        train_labels: (n_samples, n_classes) binary label matrix
-        class_names: List of disease class names
-        method: "inverse_frequency", "effective_num", or "focal_loss"
-        smoothing: Smoothing parameter to avoid extreme weights
-    
-    Returns:
-        Dictionary mapping class names to float weights
-    """
     if train_labels.ndim != 2:
         raise ValueError("Expected 2D label matrix for class-weight computation.")
 
@@ -46,7 +24,6 @@ def compute_balanced_class_weights(
     weights: Dict[str, float] = {}
 
     if method == "inverse_frequency":
-        # Standard inverse-frequency weighting
         for idx, class_name in enumerate(class_names):
             positive_count = int(np.sum(train_labels[:, idx]))
             positive_count = max(positive_count, 1)
@@ -54,8 +31,7 @@ def compute_balanced_class_weights(
             weights[class_name] = weight
 
     elif method == "effective_num":
-        # Effective number of samples (handles repeated oversampling)
-        beta = 0.99  # Empirical hyperparameter
+        beta = 0.99
         for idx, class_name in enumerate(class_names):
             positive_count = int(np.sum(train_labels[:, idx]))
             positive_count = max(positive_count, 1)
@@ -64,8 +40,7 @@ def compute_balanced_class_weights(
             weights[class_name] = weight
 
     elif method == "focal_loss":
-        # Focal loss weights (emphasizes hard examples)
-        gamma = 2.0  # Focusing parameter
+        gamma = 2.0
         for idx, class_name in enumerate(class_names):
             positive_count = int(np.sum(train_labels[:, idx]))
             positive_count = max(positive_count, 1)
@@ -76,7 +51,6 @@ def compute_balanced_class_weights(
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    # Normalize weights so the average weight is 1.0 and clamp extremes
     weight_values = np.array(list(weights.values()), dtype=np.float32)
     mean_weight = float(np.mean(weight_values)) if weight_values.size else 1.0
     normalized_weights: Dict[str, float] = {}
@@ -91,43 +65,25 @@ def compute_sample_weights(
     y_train: np.ndarray,
     method: str = "inverse_frequency",
 ) -> np.ndarray:
-    """
-    Compute per-sample weights based on label composition.
-    
-    Emphasizes samples with rare diseases and downweights common ones.
-    
-    Args:
-        y_train: (n_samples, n_classes) binary label matrix
-        method: "inverse_frequency" or "effective_num"
-    
-    Returns:
-        (n_samples,) weight array
-    """
     total_samples, num_classes = y_train.shape
     
-    # Compute class frequencies
     class_frequencies = np.mean(y_train, axis=0)
     class_frequencies = np.clip(class_frequencies, 1e-6, 1.0 - 1e-6)
     
     if method == "inverse_frequency":
         class_weights = 1.0 / class_frequencies
     elif method == "effective_num":
-        # Effective number weighting
         beta = 0.99
         effective_num = 1.0 - np.power(beta, np.sum(y_train, axis=0))
         class_weights = (1.0 - beta) / np.maximum(effective_num, 1e-6)
     else:
         raise ValueError(f"Unknown method: {method}")
     
-    # Normalize class weights
     class_weights = class_weights / np.mean(class_weights)
     
-    # Per-sample weight = average weight of positive classes
     sample_weights = np.sum(y_train * class_weights[None, :], axis=1)
-    # For samples with no disease, assign weight of 1.0
     sample_weights = np.where(sample_weights > 0, sample_weights, 1.0)
     
-    # Normalize to prevent extreme scaling
     sample_weights = sample_weights / np.mean(sample_weights)
     
     return sample_weights.astype(np.float32)
@@ -138,21 +94,9 @@ def get_class_balance_report(
     class_names: List[str],
     split_name: str = "dataset",
 ) -> Dict[str, object]:
-    """
-    Generate detailed class balance report.
-    
-    Args:
-        labels: (n_samples, n_classes) binary label matrix
-        class_names: List of disease class names
-        split_name: Name of the split (train/val/test)
-    
-    Returns:
-        Dictionary with balance statistics
-    """
     class_counts = np.sum(labels, axis=0)
     total_samples = labels.shape[0]
     
-    # Statistics
     max_count = class_counts.max()
     min_count = class_counts.min()
     imbalance_ratio = max_count / max(min_count, 1)
@@ -166,7 +110,6 @@ def get_class_balance_report(
             "percentage": round(ratio, 2),
         }
     
-    # Healthy samples (no disease)
     healthy_count = np.sum(np.all(labels == 0, axis=1))
     diseased_count = total_samples - healthy_count
     
@@ -191,21 +134,6 @@ def oversample_minority_classes(
     target_ratio: float = 1.0,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, np.ndarray]:
-    """
-    Oversample minority classes to improve balance.
-    
-    Creates copies of samples from rare classes to increase their representation.
-    
-    Args:
-        df: DataFrame with sample metadata (must have index matching labels)
-        labels: (n_samples, n_classes) binary label matrix
-        class_names: List of disease class names
-        target_ratio: Target ratio of minority to majority class
-        seed: Random seed
-    
-    Returns:
-        Oversampled (df, labels) tuple
-    """
     rng = np.random.RandomState(seed)
     np.random.seed(seed)
     
@@ -220,7 +148,6 @@ def oversample_minority_classes(
         current_count = len(class_indices)
 
         if current_count > 0 and current_count < target_count:
-            # Calculate how many samples to add
             samples_needed = target_count - current_count
 
             if samples_needed > 0:
@@ -233,7 +160,6 @@ def oversample_minority_classes(
 
     LOGGER.info("Oversampling %d duplicate records from minority classes", len(indices_to_add))
 
-    # Append oversampled data and shuffle the resulting training set
     oversampled_df = pd.concat([df, df.iloc[indices_to_add]], ignore_index=True)
     oversampled_labels = np.vstack([labels, labels[indices_to_add]])
 
@@ -254,39 +180,19 @@ def stratified_split_by_disease(
     minority_threshold: float = 0.05,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Split data with stratification on minority classes.
-    
-    Ensures all classes, especially rare ones, are represented in each split.
-    
-    Args:
-        df: DataFrame with samples
-        labels: (n_samples, n_classes) binary label matrix
-        train_ratio: Proportion for training
-        val_ratio: Proportion for validation
-        test_ratio: Proportion for testing
-        minority_threshold: Classes with < this ratio are treated as minority
-        seed: Random seed
-    
-    Returns:
-        (train_df, val_df, test_df, train_labels, val_labels, test_labels)
-    """
     rng = np.random.RandomState(seed)
     
-    # Identify minority classes
     class_ratios = np.mean(labels, axis=0)
     minority_classes = np.where(class_ratios < minority_threshold)[0]
     
     LOGGER.info("Identified %d minority classes", len(minority_classes))
     
-    # For each minority class, ensure balanced representation
     train_indices = []
     val_indices = []
     test_indices = []
     
     all_indices = set(range(len(df)))
     
-    # First, handle minority classes separately
     for class_idx in minority_classes:
         class_indices = np.where(labels[:, class_idx] == 1)[0]
         rng.shuffle(class_indices)
@@ -298,11 +204,9 @@ def stratified_split_by_disease(
         val_indices.extend(class_indices[n_train:n_train + n_val])
         test_indices.extend(class_indices[n_train + n_val:])
         
-        # Remove from all_indices
         for idx in class_indices:
             all_indices.discard(idx)
     
-    # For remaining samples, random split
     remaining = np.array(list(all_indices))
     rng.shuffle(remaining)
     
@@ -331,7 +235,6 @@ def save_balance_report(
     report: Dict[str, object],
     output_path: Path,
 ) -> None:
-    """Save class balance report to JSON file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)

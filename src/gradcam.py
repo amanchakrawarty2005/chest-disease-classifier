@@ -1,5 +1,3 @@
-"""Phase 3 explainability script: Grad-CAM visualizations on test images."""
-
 from __future__ import annotations
 
 import argparse

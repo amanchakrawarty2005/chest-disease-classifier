@@ -1,5 +1,3 @@
-"""Phase 2 training script for NIH Chest X-ray multi-label classification."""
-
 from __future__ import annotations
 
 import argparse
@@ -147,28 +145,10 @@ def compile_model(model: tf.keras.Model, learning_rate: float) -> None:
 
 
 def build_sample_weights(y_train: np.ndarray, method: str = "inverse_frequency") -> np.ndarray:
-    """Emphasize rare positive findings without over-penalizing healthy samples.
-    
-    Args:
-        y_train: (n_samples, n_classes) binary label matrix
-        method: "inverse_frequency" or "effective_num" weighting
-    
-    Returns:
-        (n_samples,) weight array for training
-    """
     return compute_sample_weights(y_train, method=method)
 
 
 def load_class_weights(processed_data_dir: Path, method: str = "recommended") -> Optional[Dict[str, float]]:
-    """Load precomputed class weights from JSON file.
-    
-    Args:
-        processed_data_dir: Directory containing class_weights.json
-        method: Which weight method to use ("recommended", "inverse_frequency", "effective_num", "focal_loss")
-    
-    Returns:
-        Dictionary mapping class names to weights, or None if not available
-    """
     weights_path = processed_data_dir / "class_weights.json"
     
     if not weights_path.exists():
@@ -179,19 +159,16 @@ def load_class_weights(processed_data_dir: Path, method: str = "recommended") ->
         with open(weights_path, "r", encoding="utf-8") as f:
             all_weights = json.load(f)
         
-        # Try to get the requested method
         if isinstance(all_weights, dict):
             if method in all_weights:
                 weights = all_weights[method]
                 LOGGER.info("Loaded %s class weights from %s", method, weights_path)
                 return weights
             elif "recommended" in all_weights:
-                # Fallback to recommended weights
                 weights = all_weights["recommended"]
                 LOGGER.info("Loaded recommended class weights (fallback from requested method '%s')", method)
                 return weights
             else:
-                # Old format - assume it's the weights dict itself
                 LOGGER.info("Loaded class weights (legacy format)")
                 return all_weights
         

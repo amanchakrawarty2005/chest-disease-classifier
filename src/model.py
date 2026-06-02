@@ -1,8 +1,5 @@
-"""Model definition for chest disease multi-label classification."""
-
 import tensorflow as tf
-from tensorflow.keras import layers, models
-
+layers, models = tf.keras.layers, tf.keras.models
 from config import (
     IMAGE_SIZE,
     NUM_CLASSES,
@@ -24,7 +21,6 @@ def _build_backbone(input_shape):
 
 
 def build_model(freeze_backbone=True):
-    """Build EfficientNetB0-based multi-label classifier."""
     input_shape = (IMAGE_SIZE, IMAGE_SIZE, 3)
 
     inputs = layers.Input(shape=input_shape, name="image")
@@ -44,7 +40,6 @@ def build_model(freeze_backbone=True):
 
 
 def unfreeze_last_layers(model):
-    """Unfreeze the last N layers of the backbone for fine-tuning."""
     backbone = None
     for layer in model.layers:
         if isinstance(layer, tf.keras.Model) and "efficientnet" in layer.name.lower():

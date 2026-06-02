@@ -1,5 +1,3 @@
-"""Phase 3 evaluation script for multi-label chest disease classifier."""
-
 from __future__ import annotations
 
 import argparse
@@ -123,17 +121,6 @@ def compute_per_class_metric(
 
 
 def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, threshold: float) -> Dict[str, object]:
-    """
-    Evaluate predictions with comprehensive metrics.
-    
-    Args:
-        y_true: (n_samples, n_classes) binary label matrix
-        y_prob: (n_samples, n_classes) predicted probabilities
-        threshold: Classification threshold
-    
-    Returns:
-        Dictionary with various evaluation metrics
-    """
     y_pred = (y_prob >= threshold).astype(np.float32)
 
     per_class_auc = compute_per_class_metric(y_true, y_prob, roc_auc_score)
@@ -142,9 +129,8 @@ def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, threshold: floa
     valid_aucs = [value for value in per_class_auc.values() if value is not None]
     valid_aps = [value for value in per_class_ap.values() if value is not None]
 
-    # Compute class-weighted metrics to handle imbalance
     class_weights = np.mean(y_true, axis=0)
-    class_weights = class_weights / np.sum(class_weights)  # Normalize
+    class_weights = class_weights / np.sum(class_weights)
     
     weighted_auc_scores = [
         per_class_auc[class_name] * class_weights[idx]
@@ -162,7 +148,6 @@ def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, threshold: floa
         "hamming_accuracy": float(np.mean(y_pred == y_true)),
     }
 
-    # Get minority class metrics (classes with < 5% prevalence)
     minority_indices = np.where(np.mean(y_true, axis=0) < 0.05)[0]
     if len(minority_indices) > 0:
         minority_auc = np.mean([
@@ -216,12 +201,10 @@ def main() -> None:
     LOGGER.info("Running predictions...")
     y_prob = model.predict(dataset, verbose=1)
 
-    # Generate evaluation report
     report = evaluate_predictions(y_true, y_prob, threshold=args.threshold)
     report["test_samples"] = int(len(image_paths))
     report["model_path"] = str(model_path)
     
-    # Add class balance information
     balance_report = get_class_balance_report(y_true, DISEASE_CLASSES, "test")
     report["class_balance"] = balance_report
 

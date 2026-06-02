@@ -1,5 +1,3 @@
-"""Inference helpers for FastAPI prediction endpoint."""
-
 from __future__ import annotations
 
 import json
@@ -15,7 +13,6 @@ LOGGER = logging.getLogger("api.inference")
 
 
 class ChestXrayInferenceService:
-    """Loads trained model and serves single-image predictions."""
 
     def __init__(self, model_dir: Path, image_size: int, disease_classes: Sequence[str]) -> None:
         self.model_dir = Path(model_dir)
@@ -50,8 +47,6 @@ class ChestXrayInferenceService:
         )
     
     def load_class_weights(self) -> Optional[Dict[str, float]]:
-        """Load class weights from processed data directory."""
-        # Try to find class_weights.json in parent directory
         parent_dir = self.model_dir.parent
         weights_path = parent_dir / "data" / "processed" / "class_weights.json"
         
@@ -63,14 +58,12 @@ class ChestXrayInferenceService:
             with open(weights_path, "r", encoding="utf-8") as f:
                 all_weights = json.load(f)
             
-            # Handle new format with multiple weight options
             if isinstance(all_weights, dict):
                 if "recommended" in all_weights:
                     self._class_weights = all_weights["recommended"]
                     LOGGER.info("Loaded recommended class weights (for handling imbalance)")
                     return self._class_weights
                 else:
-                    # Old format - assume it's the weights dict itself
                     self._class_weights = all_weights
                     LOGGER.info("Loaded class weights (legacy format)")
                     return self._class_weights
@@ -89,19 +82,17 @@ class ChestXrayInferenceService:
         self._model_path = path
         LOGGER.info("Model loaded successfully.")
         
-        # Try to load class weights for balanced predictions
         self.load_class_weights()
         
         return path
 
     def preprocess_image_bytes(self, raw_bytes: bytes) -> np.ndarray:
-        """Decode image bytes and transform to (1, H, W, 3) float32 batch."""
         if not raw_bytes:
             raise ValueError("Uploaded file is empty.")
 
         try:
             image = tf.io.decode_image(raw_bytes, channels=1, expand_animations=False)
-        except Exception as exc:  # pragma: no cover - TensorFlow raises several subclasses
+        except Exception as exc:  
             raise ValueError("Uploaded file is not a valid image.") from exc
 
         image = tf.image.resize(image, [self.image_size, self.image_size], method="bilinear")
@@ -134,13 +125,9 @@ class ChestXrayInferenceService:
         for idx, (disease, prob) in enumerate(zip(self.disease_classes, probabilities)):
             probability = float(prob)
             
-            # Use class-specific threshold if weights are available
-            # Higher weight (rarer class) = lower threshold = more sensitive detection
             class_threshold = threshold
             if self._class_weights and disease in self._class_weights:
                 weight = self._class_weights[disease]
-                # Adjust threshold based on class weight
-                # Higher weight means we want to be more sensitive (lower threshold)
                 class_threshold = threshold / (1.0 + weight / 10.0)
             
             scores.append(

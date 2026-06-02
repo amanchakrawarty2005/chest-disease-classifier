@@ -1,5 +1,3 @@
-"""Streamlit dashboard for Chest Disease Classifier inference."""
-
 from __future__ import annotations
 
 import base64
@@ -14,13 +12,12 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# Make src/config importable from dashboard/
 BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from config import (  # noqa: E402
+from config import (  
     DISEASE_CLASSES,
     PROCESSED_DATA_DIR,
     STREAMLIT_LAYOUT,
@@ -69,7 +66,6 @@ def call_predict_api(
 
 
 def render_upload_preview(uploaded_name: str, image_bytes: bytes, content_type: Optional[str]) -> None:
-    """Show metadata-only preview and open-in-new-tab link (no inline image render)."""
     resolved_content_type = content_type or mimetypes.guess_type(uploaded_name)[0] or "image/png"
     size_kb = len(image_bytes) / 1024.0
 
@@ -105,8 +101,8 @@ def render_prediction_summary(result: Dict[str, Any]) -> None:
     else:
         right.metric("Top Disease", "N/A")
 
-    if predicted_labels:
-        st.success("Predicted diseases: " + ", ".join(predicted_labels))
+    if Handled_labels := predicted_labels:
+        st.success("Predicted diseases: " + ", ".join(Handled_labels))
     else:
         st.info("No disease crossed the current threshold. Try lowering threshold for demo exploration.")
 

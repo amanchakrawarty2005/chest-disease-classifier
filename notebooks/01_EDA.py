@@ -1,15 +1,3 @@
-"""
-Phase 1A: Exploratory Data Analysis (EDA)
-Analyze the NIH Chest X-ray dataset before preprocessing.
-
-This script:
-1. Loads dataset metadata from Data_Entry_2017.csv
-2. Analyzes disease distribution and co-occurrence
-3. Examines image statistics
-4. Generates visualizations
-5. Provides insights for preprocessing decisions
-"""
-
 import os
 import sys
 from PIL import report
@@ -21,7 +9,6 @@ from pathlib import Path
 from collections import Counter
 import json
 
-# Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from config import (
@@ -29,13 +16,11 @@ from config import (
     IMAGE_SIZE, RANDOM_SEED
 )
 
-# Set style
 sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (14, 8)
 plt.rcParams['font.size'] = 10
 
 class ChestXrayEDA:
-    """Exploratory Data Analysis for Chest X-ray dataset."""
     
     def __init__(self, raw_data_dir=RAW_DATA_DIR, output_dir=PROCESSED_DATA_DIR):
         self.raw_data_dir = Path(raw_data_dir)
@@ -45,7 +30,6 @@ class ChestXrayEDA:
         self.disease_counts = None
         
     def load_dataset(self):
-        """Load metadata from CSV file."""
         print("\n" + "="*70)
         print("STEP 1: LOADING DATASET")
         print("="*70)
@@ -64,13 +48,11 @@ class ChestXrayEDA:
             raise
     
     def parse_diseases(self, finding_labels):
-        """Parse disease labels from string format."""
         if pd.isna(finding_labels) or finding_labels == "No Finding":
             return []
         return [disease.strip() for disease in str(finding_labels).split("|")]
     
     def analyze_basic_stats(self):
-        """Display basic dataset statistics."""
         print("\n" + "="*70)
         print("STEP 2: BASIC STATISTICS")
         print("="*70)
@@ -81,14 +63,12 @@ class ChestXrayEDA:
         print(f"   Finding column: {self.df.columns[1]}")
         print(f"   Patient ID column: {self.df.columns[2]}")
         
-        # Parse diseases
         print(f"\n🔄 Parsing disease labels...")
         self.df['diseases'] = self.df[self.df.columns[1]].apply(self.parse_diseases)
         self.df['num_diseases'] = self.df['diseases'].apply(len)
         
         print(f"   ✅ Disease parsing complete")
         
-        # Disease statistics
         print(f"\n📈 Disease Statistics:")
         print(f"   Images with No Finding: {(self.df['num_diseases'] == 0).sum():,}")
         print(f"   Images with 1 disease: {(self.df['num_diseases'] == 1).sum():,}")
@@ -98,12 +78,10 @@ class ChestXrayEDA:
         return self.df
     
     def analyze_disease_distribution(self):
-        """Analyze distribution of each disease class."""
         print("\n" + "="*70)
         print("STEP 3: DISEASE CLASS DISTRIBUTION")
         print("="*70)
         
-        # Count occurrences of each disease
         all_diseases = []
         for disease_list in self.df['diseases']:
             all_diseases.extend(disease_list)
@@ -123,12 +101,10 @@ class ChestXrayEDA:
         return self.disease_counts
     
     def analyze_class_imbalance(self):
-        """Analyze class imbalance and calculate weights."""
         print("\n" + "="*70)
         print("STEP 4: CLASS IMBALANCE ANALYSIS")
         print("="*70)
         
-        # Calculate class weights for imbalanced dataset
         class_weights = {}
         counts = []
         
@@ -149,13 +125,11 @@ class ChestXrayEDA:
                 weight = 0.0
                 print(f"   {disease:20s} | Count: {count:6d} | Weight: N/A (not found)")
             else:
-                # Weight inversely proportional to frequency
                 weight = total_samples / (len(DISEASE_CLASSES) * max(count, 1))
                 class_weights[disease] = float(weight)
                 ratio = (count / total_samples) * 100
                 print(f"   {disease:20s} | Count: {count:6d} ({ratio:5.1f}%) | Weight: {weight:.3f}")
         
-        # Save class weights
         weights_path = self.output_dir / "class_weights.json"
         with open(weights_path, 'w') as f:
             json.dump(class_weights, f, indent=2)
@@ -164,23 +138,19 @@ class ChestXrayEDA:
         return class_weights
     
     def analyze_cooccurrence(self):
-        """Analyze co-occurrence of disease pairs."""
         print("\n" + "="*70)
         print("STEP 5: DISEASE CO-OCCURRENCE ANALYSIS")
         print("="*70)
         
-        # Create co-occurrence matrix
         cooccurrence = {}
         
         for disease_list in self.df['diseases']:
             if len(disease_list) >= 2:
-                # Count pairs
                 for i, d1 in enumerate(disease_list):
                     for d2 in disease_list[i+1:]:
                         pair = tuple(sorted([d1, d2]))
                         cooccurrence[pair] = cooccurrence.get(pair, 0) + 1
         
-        # Top co-occurrences
         print(f"\n🔗 Top Disease Pairs:")
         print("-" * 50)
         
@@ -191,12 +161,10 @@ class ChestXrayEDA:
         return cooccurrence
     
     def generate_visualizations(self):
-        """Generate and save visualization plots."""
         print("\n" + "="*70)
         print("STEP 6: GENERATING VISUALIZATIONS")
         print("="*70)
         
-        # 1. Disease distribution bar chart
         print("\n📊 Creating disease distribution chart...")
         fig, ax = plt.subplots(figsize=(12, 6))
         
@@ -212,20 +180,18 @@ class ChestXrayEDA:
                     fontsize=14, fontweight='bold', pad=20)
         ax.grid(axis='x', alpha=0.3)
         
-        # Add count labels
         for bar, count in zip(bars, counts):
             width = bar.get_width()
             ax.text(width, bar.get_y() + bar.get_height()/2, 
-                   f'{int(count):,}', 
-                   ha='left', va='center', fontsize=9)
+                    f'{int(count):,}', 
+                    ha='left', va='center', fontsize=9)
         
         plt.tight_layout()
         fig_path = self.output_dir / "01_disease_distribution.png"
         plt.savefig(fig_path, dpi=150, bbox_inches='tight')
-        print(f"   ✅ Saved to {fig_path}")
+        print(f"   ` Saved to {fig_path}")
         plt.close()
         
-        # 2. Number of diseases per image distribution
         print("\n📊 Creating number of diseases distribution...")
         fig, ax = plt.subplots(figsize=(10, 6))
         
@@ -238,22 +204,20 @@ class ChestXrayEDA:
         ax.set_title('Distribution of Multi-label Cases', fontsize=14, fontweight='bold', pad=20)
         ax.grid(axis='y', alpha=0.3)
         
-        # Add percentage labels
         total = disease_counts.sum()
         for bar, (idx, count) in zip(bars, disease_counts.items()):
             height = bar.get_height()
             percentage = (count / total) * 100
             ax.text(bar.get_x() + bar.get_width()/2, height, 
-                   f'{percentage:.1f}%\n({int(count):,})', 
-                   ha='center', va='bottom', fontsize=10, fontweight='bold')
+                    f'{percentage:.1f}%\n({int(count):,})', 
+                    ha='center', va='bottom', fontsize=10, fontweight='bold')
         
         plt.tight_layout()
         fig_path = self.output_dir / "02_multilabel_distribution.png"
         plt.savefig(fig_path, dpi=150, bbox_inches='tight')
-        print(f"   ✅ Saved to {fig_path}")
+        print(f"   ` Saved to {fig_path}")
         plt.close()
         
-        # 3. Class imbalance visualization
         print("\n📊 Creating class imbalance chart...")
         fig, ax = plt.subplots(figsize=(12, 6))
         
@@ -269,7 +233,6 @@ class ChestXrayEDA:
                     fontsize=14, fontweight='bold', pad=20)
         ax.grid(axis='x', alpha=0.3)
         
-        # Color legend
         from matplotlib.patches import Patch
         legend_elements = [
             Patch(facecolor='#ff9999', edgecolor='black', label='Rare (<5%)'),
@@ -281,14 +244,13 @@ class ChestXrayEDA:
         plt.tight_layout()
         fig_path = self.output_dir / "03_class_imbalance.png"
         plt.savefig(fig_path, dpi=150, bbox_inches='tight')
-        print(f"   ✅ Saved to {fig_path}")
+        print(f"   ` Saved to {fig_path}")
         plt.close()
         
         print("\n✅ All visualizations generated!")
         return True
     
     def generate_summary_report(self):
-        """Generate a text summary report."""
         print("\n" + "="*70)
         print("STEP 7: GENERATING SUMMARY REPORT")
         print("="*70)
@@ -320,11 +282,11 @@ Imbalance Ratio:           {sorted(self.disease_counts.items(), key=lambda x: x[
 
 💡 KEY INSIGHTS
 ─────────────────────────────────────────────────────────────────────────
-✓ Multi-label classification task (images can have multiple diseases)
-✓ Significant class imbalance - some diseases are much rarer
-✓ "No Finding" is a common class - requires handling
-✓ Need class weights for balanced training
-✓ Consider stratified train/val/test split
+` Multi-label classification task (images can have multiple diseases)
+` Significant class imbalance - some diseases are much rarer
+` "No Finding" is a common class - requires handling
+` Need class weights for balanced training
+` Consider stratified train/val/test split
 
 📋 PREPROCESSING PLAN
 ─────────────────────────────────────────────────────────────────────────
@@ -345,7 +307,6 @@ Imbalance Ratio:           {sorted(self.disease_counts.items(), key=lambda x: x[
         
         print(report)
         
-        # Save report
         report_path = self.output_dir / "EDA_REPORT.txt"
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
@@ -353,7 +314,6 @@ Imbalance Ratio:           {sorted(self.disease_counts.items(), key=lambda x: x[
         print(f"\n✅ Report saved to {report_path}")
     
     def run_full_eda(self):
-        """Run complete EDA pipeline."""
         print("\n")
         print("╔" + "="*68 + "╗")
         print("║" + " "*68 + "║")
@@ -387,9 +347,7 @@ Imbalance Ratio:           {sorted(self.disease_counts.items(), key=lambda x: x[
 
 
 if __name__ == "__main__":
-    # Run EDA
     eda = ChestXrayEDA()
     success = eda.run_full_eda()
     
-    # Exit with appropriate code
     exit(0 if success else 1)

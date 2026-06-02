@@ -1,5 +1,3 @@
-"""FastAPI app for chest disease model inference."""
-
 from __future__ import annotations
 
 import logging
@@ -11,13 +9,12 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
-# Make src/ importable when running: uvicorn api.main:app --reload
 BASE_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = BASE_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from config import (  # noqa: E402
+from config import (  
     API_DESCRIPTION,
     API_TITLE,
     API_VERSION,
@@ -26,8 +23,8 @@ from config import (  # noqa: E402
     MODEL_DIR,
 )
 
-from api.inference import ChestXrayInferenceService  # noqa: E402
-from api.schemas import HealthResponse, PredictResponse  # noqa: E402
+from api.inference import ChestXrayInferenceService  
+from api.schemas import HealthResponse, PredictResponse  
 
 LOGGER = logging.getLogger("api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -45,7 +42,7 @@ async def lifespan(app: FastAPI):
     try:
         model_path = inference_service.load_model()
         LOGGER.info("Startup complete. Loaded model: %s", model_path)
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:  
         LOGGER.error("Startup warning: model could not be loaded yet (%s)", exc)
     yield
 
@@ -117,7 +114,7 @@ async def predict(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:  
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Inference error: {exc}") from exc
 
     top_predictions, all_predictions, predicted_labels = service.format_predictions(

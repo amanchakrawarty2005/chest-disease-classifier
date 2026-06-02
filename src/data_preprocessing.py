@@ -1,9 +1,3 @@
-"""Phase 1B preprocessing pipeline for NIH Chest X-ray metadata.
-
-This module prepares train/validation/test metadata files used by training.
-Outputs are intentionally stable so downstream scripts keep working.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -44,7 +38,6 @@ def configure_logging(level: str = "INFO") -> None:
 
 
 def parse_finding_labels(raw_label: str) -> List[str]:
-    """Convert NIH 'Finding Labels' cell into a clean disease list."""
     if pd.isna(raw_label) or str(raw_label).strip() == "No Finding":
         return []
     return [item.strip() for item in str(raw_label).split("|") if item.strip()]
@@ -57,7 +50,6 @@ def validate_split_ratios(train_ratio: float, val_ratio: float, test_ratio: floa
 
 
 def safe_stratify_target(series: pd.Series, stage_name: str, min_count: int = 2) -> Optional[pd.Series]:
-    """Return series for stratification when every class has enough samples."""
     counts = series.value_counts(dropna=False)
     current_min = int(counts.min()) if len(counts) else 0
 
@@ -74,7 +66,6 @@ def safe_stratify_target(series: pd.Series, stage_name: str, min_count: int = 2)
 
 
 def build_image_lookup(raw_data_dir: Path, patterns: Iterable[str] = ("*.png", "*.jpg", "*.jpeg")) -> Dict[str, str]:
-    """Map image filename -> absolute path (supports nested NIH folders)."""
     lookup: Dict[str, str] = {}
     for pattern in patterns:
         for path in raw_data_dir.rglob(pattern):
@@ -83,7 +74,6 @@ def build_image_lookup(raw_data_dir: Path, patterns: Iterable[str] = ("*.png", "
 
 
 def compute_class_weights(train_labels: np.ndarray, class_names: List[str]) -> Dict[str, float]:
-    """Compute inverse-frequency weights for multi-label BCE training."""
     if train_labels.ndim != 2:
         raise ValueError("Expected 2D label matrix for class-weight computation.")
 
@@ -96,8 +86,6 @@ def compute_class_weights(train_labels: np.ndarray, class_names: List[str]) -> D
 
 
 class NIHPreprocessor:
-    """Prepare metadata splits and labels for model training/evaluation."""
-
     def __init__(
         self,
         raw_data_dir: Path,
@@ -181,7 +169,6 @@ class NIHPreprocessor:
 
     @staticmethod
     def build_split_dataframe(split_df: pd.DataFrame, split_labels: np.ndarray, image_lookup: Dict[str, str]) -> pd.DataFrame:
-        """Build output dataframe pairing images with labels (already aligned)."""
         out_df = pd.DataFrame(
             {
                 "Image Index": split_df["Image Index"].values,
@@ -199,12 +186,10 @@ class NIHPreprocessor:
         test_df: pd.DataFrame,
         apply_oversampling: bool = True,
     ) -> None:
-        # Extract labels using original dataframe indices BEFORE any modifications
         original_train_labels = label_matrix[train_df.index.to_numpy()].copy()
         val_labels = label_matrix[val_df.index.to_numpy()].copy()
         test_labels = label_matrix[test_df.index.to_numpy()].copy()
         
-        # Apply oversampling to training data for better balance
         if apply_oversampling:
             LOGGER.info("Applying minority class oversampling to training data...")
             train_df, train_labels = oversample_minority_classes(
@@ -217,7 +202,6 @@ class NIHPreprocessor:
         else:
             train_labels = original_train_labels.copy()
         
-        # Reset all dataframe indices to be sequential and aligned with their labels
         train_df = train_df.reset_index(drop=True)
         val_df = val_df.reset_index(drop=True)
         test_df = test_df.reset_index(drop=True)
@@ -243,8 +227,6 @@ class NIHPreprocessor:
             out_df.to_csv(out_csv, index=False)
             LOGGER.info("Saved %s labels: %s", split_name, out_csv)
 
-        # Compute and save class weights (using ORIGINAL non-oversampled training data for weights)
-        # Generate multiple weight options
         weights_inverse = compute_balanced_class_weights(
             original_train_labels, DISEASE_CLASSES, method="inverse_frequency"
         )
@@ -269,13 +251,11 @@ class NIHPreprocessor:
             )
         LOGGER.info("Saved class weights: %s", weights_path)
 
-        # Generate and save class balance reports
         for split_name, split_labels in all_labels.items():
             report = get_class_balance_report(split_labels, DISEASE_CLASSES, split_name)
             report_path = self.processed_data_dir / f"{split_name}_balance_report.json"
             save_balance_report(report, report_path)
             
-            # Log summary
             LOGGER.info(
                 "%s split - Total: %d | Healthy: %d | Diseased: %d | Imbalance Ratio: %.2fx",
                 split_name.upper(),
