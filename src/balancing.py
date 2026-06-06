@@ -17,6 +17,15 @@ def compute_balanced_class_weights(
     method: str = "inverse_frequency",
     smoothing: float = 1.0,
 ) -> Dict[str, float]:
+    """
+    Compute class weights to counteract imbalance.
+    
+    Methods:
+    - inverse_frequency: Simple 1/frequency weighting (most effective for high imbalance)
+    - effective_num: Per-class effective sample number (less aggressive)
+    - focal_loss: (1-p)^gamma / p weighting (good for hard negatives)
+    - sqrt_inverse: sqrt(1/frequency) - balanced between aggressive and conservative
+    """
     if train_labels.ndim != 2:
         raise ValueError("Expected 2D label matrix for class-weight computation.")
 
@@ -28,6 +37,15 @@ def compute_balanced_class_weights(
             positive_count = int(np.sum(train_labels[:, idx]))
             positive_count = max(positive_count, 1)
             weight = float(total_samples / positive_count)
+            weights[class_name] = weight
+
+    elif method == "sqrt_inverse":
+        # Middle ground: sqrt of inverse frequency
+        # Less aggressive than pure inverse but more balanced than effective_num
+        for idx, class_name in enumerate(class_names):
+            positive_count = int(np.sum(train_labels[:, idx]))
+            positive_count = max(positive_count, 1)
+            weight = np.sqrt(float(total_samples / positive_count))
             weights[class_name] = weight
 
     elif method == "effective_num":
@@ -56,7 +74,8 @@ def compute_balanced_class_weights(
     normalized_weights: Dict[str, float] = {}
     for class_name, weight in weights.items():
         normalized = float(weight / max(mean_weight, 1e-6))
-        normalized_weights[class_name] = float(np.clip(normalized, 0.1, 10.0))
+        # Allow wider range for rare classes
+        normalized_weights[class_name] = float(np.clip(normalized, 0.1, 15.0))
 
     return normalized_weights
 
@@ -134,31 +153,56 @@ def oversample_minority_classes(
     target_ratio: float = 1.0,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, np.ndarray]:
+    """
+    Aggressive oversampling for minority classes to achieve true balance.
+    
+    Strategy:
+    - Calculate target count per class to equalize representation
+    - Oversample rare classes (especially Cardiomegaly, Hernia) to match most common
+    - Apply stronger oversampling for classes < 5% baseline frequency
+    """
     rng = np.random.RandomState(seed)
     np.random.seed(seed)
     
     class_counts = np.sum(labels, axis=0)
     max_count = class_counts.max()
+    
+    # AGGRESSIVE OVERSAMPLING: target ratio should be 1.0 to balance all classes
     target_count = int(max_count * target_ratio)
     
     indices_to_add = []
+    class_oversampling_stats = {}
     
     for class_idx, class_name in enumerate(class_names):
         class_indices = np.where(labels[:, class_idx] == 1)[0]
         current_count = len(class_indices)
+        class_freq = current_count / len(labels) * 100
 
         if current_count > 0 and current_count < target_count:
             samples_needed = target_count - current_count
 
             if samples_needed > 0:
+                # For very rare classes, allow repetition with replacement
                 selected = rng.choice(class_indices, size=samples_needed, replace=True)
                 indices_to_add.extend(selected)
+                
+                class_oversampling_stats[class_name] = {
+                    "original_count": int(current_count),
+                    "target_count": int(target_count),
+                    "oversampled": int(samples_needed),
+                    "frequency_pct": round(class_freq, 2)
+                }
 
     if not indices_to_add:
         LOGGER.info("No oversampling needed - classes are already balanced")
         return df, labels
 
-    LOGGER.info("Oversampling %d duplicate records from minority classes", len(indices_to_add))
+    LOGGER.info("Aggressive oversampling: %d total duplicates from %d classes", 
+                len(indices_to_add), len(class_oversampling_stats))
+    for cls_name, stats in class_oversampling_stats.items():
+        LOGGER.info("  %s: %d → %d (+%d samples, freq: %.2f%%)", 
+                    cls_name, stats["original_count"], stats["target_count"], 
+                    stats["oversampled"], stats["frequency_pct"])
 
     oversampled_df = pd.concat([df, df.iloc[indices_to_add]], ignore_index=True)
     oversampled_labels = np.vstack([labels, labels[indices_to_add]])

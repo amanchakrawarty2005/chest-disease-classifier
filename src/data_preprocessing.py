@@ -244,7 +244,7 @@ class NIHPreprocessor:
                     "inverse_frequency": weights_inverse,
                     "effective_num": weights_effective,
                     "focal_loss": weights_focal,
-                    "recommended": weights_effective,
+                    "recommended": weights_inverse,  # inverse_frequency is discriminative at 100k+ scale
                 },
                 handle,
                 indent=2,

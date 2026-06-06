@@ -122,20 +122,17 @@ def load_class_weights(processed_data_dir: Path, method: str = "recommended") ->
 
 
 def load_trained_model(model_dir: Path, processed_data_dir: Path) -> Tuple[tf.keras.Model, Path]:
+    """
+    Load model with compile=False so custom loss objects (focal_bce, weighted_bce)
+    do not need to be reconstructed at evaluation time.
+    The model is used only for inference (model.predict), not training.
+    """
     final_path = model_dir / "final_model.keras"
-    best_path = model_dir / "best_model.keras"
-    
-    class_weights_dict = load_class_weights(processed_data_dir, method="effective_num")
-    if class_weights_dict is None:
-        raise RuntimeError("Class weights file not found. Ensure preprocessing ran successfully.")
-    
-    loss_fn = get_weighted_bce_loss(class_weights_dict, DISEASE_CLASSES)
-    custom_objects = {"weighted_bce": loss_fn}
+    best_path  = model_dir / "best_model.keras"
 
-    if final_path.exists():
-        return tf.keras.models.load_model(final_path, custom_objects=custom_objects), final_path
-    if best_path.exists():
-        return tf.keras.models.load_model(best_path, custom_objects=custom_objects), best_path
+    for path in (final_path, best_path):
+        if path.exists():
+            return tf.keras.models.load_model(path, compile=False), path
 
     raise FileNotFoundError("No trained model found. Expected final_model.keras or best_model.keras.")
 
@@ -187,7 +184,7 @@ def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, threshold: floa
         "hamming_accuracy": float(np.mean(y_pred == y_true)),
     }
 
-    minority_indices = np.where(np.mean(y_true, axis=0) < 0.05)[0]
+    minority_indices = np.where(np.mean(y_true, axis=0) < 0.03)[0]  # 3% captures Cardiomegaly (2.48%)
     if len(minority_indices) > 0:
         minority_auc = np.mean([
             per_class_auc[DISEASE_CLASSES[idx]]

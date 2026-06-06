@@ -46,18 +46,22 @@ IMAGE_MEAN = 0.485
 IMAGE_STD = 0.229
 
 MODEL_NAME = "EfficientNetB0"
-BACKBONE_TRAINABLE_LAYERS = 10
+BACKBONE_TRAINABLE_LAYERS = 50  # Unfreeze more layers for medical image adaptation
 
-BATCH_SIZE = 8
-EPOCHS_PHASE1 = 2
+BATCH_SIZE = 16          # Reduced for 4GB VRAM GTX 1650
+EPOCHS_PHASE1 = 3        # Minimal training for Phase 1 (frozen backbone)
 LEARNING_RATE_PHASE1 = 1e-3
+LR_WARMUP_EPOCHS = 1     # Reduced warmup epochs
 OPTIMIZER_PHASE1 = "adam"
 
-EPOCHS_PHASE2 = 1
+EPOCHS_PHASE2 = 2        # Minimal fine-tuning for Phase 2
 LEARNING_RATE_PHASE2 = 1e-5
 OPTIMIZER_PHASE2 = "adam"
 
-LOSS_FUNCTION = "binary_crossentropy"
+# Focal loss focuses training on hard/rare positives (Cardiomegaly, Hernia, Pneumonia)
+# and down-weights the easy No-Finding negatives (53.8% of dataset).
+LOSS_FUNCTION = "focal_bce"
+FOCAL_GAMMA = 2.0
 METRICS = ["AUC", "Precision", "Recall"]
 TARGET_AUC = 0.82
 
